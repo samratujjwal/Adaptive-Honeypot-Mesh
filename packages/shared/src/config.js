@@ -1,7 +1,11 @@
 import dotenv from "dotenv";
 import { z } from "zod";
 
-dotenv.config();
+try {
+  dotenv.config();
+} catch {
+  /* A missing or unreadable .env must not crash config loading. */
+}
 
 const configSchema = z
   .object({
@@ -10,7 +14,20 @@ const configSchema = z
     SSH_PORT: z.coerce.number().int().min(1).max(65535).default(2222),
     HTTP_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
     FTP_PORT: z.coerce.number().int().min(1).max(65535).default(2121),
-    BIND_HOST: z.string().ip().default("127.0.0.1"),
+    BIND_HOST: z.union([z.string().ipv4(), z.string().ipv6()]).default("127.0.0.1"),
+    SSH_IDLE_TIMEOUT_MS: z.coerce.number().int().min(0).default(120000),
+    SSH_MAX_SESSION_MS: z.coerce.number().int().min(0).default(600000),
+    SSH_MAX_CONNECTIONS: z.coerce.number().int().min(1).default(50),
+    SSH_MAX_CONNECTIONS_PER_IP: z.coerce.number().int().min(1).default(5),
+    SSH_MAX_AUTH_ATTEMPTS: z.coerce.number().int().min(1).default(6),
+    SSH_IDENT: z.string().min(1).default("OpenSSH_8.9p1 Ubuntu-3ubuntu0.6"),
+    HONEYPOT_HOSTNAME: z.string().min(1).default("srv-web-01"),
+    ALLOW_PUBLIC_BIND: z
+      .union([z.boolean(), z.enum(["true", "false"])])
+      .transform((value) => value === true || value === "true")
+      .default(false),
+    EVENT_DIR: z.string().min(1).default("data/events"),
+    SSH_HOST_KEY_PATH: z.string().min(1).default("data/ssh/host_ed25519"),
     LLM_MODE: z.enum(["mock", "real"]).default("mock"),
     GEMINI_API_KEY: z.string().optional(),
     GEMINI_MODEL: z.string().min(1).default("gemini-2.5-flash-lite"),
@@ -22,9 +39,16 @@ const configSchema = z
   .superRefine((value, ctx) => {
     if (value.LLM_MODE === "real" && (!value.GEMINI_API_KEY || value.GEMINI_API_KEY.trim() === "")) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["GEMINI_API_KEY"],
         message: "GEMINI_API_KEY is required when LLM_MODE is 'real'",
+      });
+    }
+    if ((value.BIND_HOST === "0.0.0.0" || value.BIND_HOST === "::") && !value.ALLOW_PUBLIC_BIND) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["BIND_HOST"],
+        message: "BIND_HOST is public (0.0.0.0 or ::) but ALLOW_PUBLIC_BIND is not true",
       });
     }
   });

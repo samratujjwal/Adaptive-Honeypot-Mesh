@@ -1,6 +1,8 @@
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 
+export const MAX_PAYLOAD_BYTES = 65536;
+
 export const eventSchema = z.object({
   id: z.string().uuid(),
   timestamp: z.string().datetime({ offset: true }),
@@ -8,9 +10,9 @@ export const eventSchema = z.object({
     service: z.enum(["ssh", "http", "ftp"]),
     nodeId: z.string().min(1),
   }),
-  sessionId: z.string().min(1),
+  sessionId: z.string().min(1).max(128),
   source: z.object({
-    ip: z.string().ip(),
+    ip: z.union([z.string().ipv4().max(45), z.string().ipv6().max(45)]),
     port: z.number().int().min(0).max(65535),
   }),
   eventType: z.enum([
@@ -42,6 +44,17 @@ export const eventSchema = z.object({
       }),
     )
     .optional(),
+}).superRefine((value, ctx) => {
+  if (value.payload !== undefined) {
+    const serialized = JSON.stringify(value.payload);
+    if (serialized !== undefined && Buffer.byteLength(serialized, "utf8") > MAX_PAYLOAD_BYTES) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["payload"],
+        message: `payload exceeds ${MAX_PAYLOAD_BYTES} bytes`,
+      });
+    }
+  }
 });
 
 /**

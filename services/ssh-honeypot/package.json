@@ -1,1 +1,1 @@
-{"main":"src/index.js","name":"@honeypot-mesh/ssh-honeypot","private":true,"scripts":{"start":"node src/index.js"},"type":"module","version":"0.1.0"}
+{"dependencies":{"ssh2":"1.17.0"},"main":"src/index.js","name":"@honeypot-mesh/ssh-honeypot","private":true,"scripts":{"start":"node src/index.js"},"type":"module","version":"0.1.0"}

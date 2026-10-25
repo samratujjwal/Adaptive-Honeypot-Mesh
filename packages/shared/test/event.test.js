@@ -55,6 +55,38 @@ test("event: createEvent adds uuid and ISO timestamp", () => {
   assert.equal(validateEvent(created).ok, true);
 });
 
+test("event: 1MB payload is rejected", () => {
+  const result = validateEvent({
+    ...validEvent(),
+    id: "123e4567-e89b-42d3-a456-426614174000",
+    timestamp: "2026-10-25T00:00:00.000Z",
+    payload: { data: "x".repeat(1024 * 1024) },
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.path === "payload"));
+});
+
+test("event: payload under the limit is accepted", () => {
+  const result = validateEvent({
+    ...validEvent(),
+    id: "123e4567-e89b-42d3-a456-426614174000",
+    timestamp: "2026-10-25T00:00:00.000Z",
+    payload: { data: "x".repeat(1000) },
+  });
+  assert.equal(result.ok, true);
+});
+
+test("event: overlong sessionId is rejected", () => {
+  const result = validateEvent({
+    ...validEvent(),
+    id: "123e4567-e89b-42d3-a456-426614174000",
+    timestamp: "2026-10-25T00:00:00.000Z",
+    sessionId: "s".repeat(129),
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.path === "sessionId"));
+});
+
 test("event: unknown service fails", () => {
   const result = validateEvent({
     ...validEvent(),
