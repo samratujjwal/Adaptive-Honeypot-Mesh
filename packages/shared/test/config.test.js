@@ -11,7 +11,8 @@ test("config: defaults load", () => {
   assert.equal(cfg.FTP_PORT, 2121);
   assert.equal(cfg.BIND_HOST, "127.0.0.1");
   assert.equal(cfg.LLM_MODE, "mock");
-  assert.equal(cfg.GEMINI_MODEL, "gemini-2.5-flash");
+  assert.equal(cfg.GEMINI_MODEL, "gemini-2.5-flash-lite");
+  assert.equal(cfg.GEMINI_FALLBACK_MODEL, "gemini-2.5-flash");
   assert.equal(cfg.KAFKA_BROKERS, "localhost:9092");
   assert.equal(cfg.ELASTICSEARCH_URL, "http://localhost:9200");
   assert.equal(cfg.NODE_ID, "node-01");
@@ -34,4 +35,18 @@ test("config: mock mode without a key passes", () => {
 
 test("config: invalid LLM_MODE fails", () => {
   assert.throws(() => loadConfig({ LLM_MODE: "bogus" }), /LLM_MODE/);
+});
+
+test("config: fallback model defaults to gemini-2.5-flash", () => {
+  const cfg = loadConfig({});
+  assert.equal(cfg.GEMINI_FALLBACK_MODEL, "gemini-2.5-flash");
+});
+
+test("config: explicit model and fallback model are respected", () => {
+  const cfg = loadConfig({
+    GEMINI_MODEL: "gemini-2.5-flash",
+    GEMINI_FALLBACK_MODEL: "gemini-2.5-flash-lite",
+  });
+  assert.equal(cfg.GEMINI_MODEL, "gemini-2.5-flash");
+  assert.equal(cfg.GEMINI_FALLBACK_MODEL, "gemini-2.5-flash-lite");
 });

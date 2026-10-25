@@ -26,6 +26,8 @@ npm install
 npm test
 ```
 
+Note: every new test file must be added to the test script or it will silently not run.
+
 ## Check available Gemini models
 
 This only lists models that support `generateContent`. It never prints
