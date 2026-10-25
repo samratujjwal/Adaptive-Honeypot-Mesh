@@ -1,0 +1,1 @@
+{"dependencies":{"dotenv":"16.4.5","pino":"9.3.2","uuid":"11.1.0","zod":"3.23.8"},"description":"Shared config, logger and event schema for the honeypot mesh","name":"@honeypot-mesh/shared","private":true,"scripts":{"test":"node --test test/config.test.js test/event.test.js test/logger.test.js"},"type":"module","version":"0.1.0"}

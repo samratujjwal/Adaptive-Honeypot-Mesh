@@ -1,0 +1,1 @@
+{"main":"src/index.js","name":"@honeypot-mesh/ftp-honeypot","private":true,"scripts":{"start":"node src/index.js"},"type":"module","version":"0.1.0"}
