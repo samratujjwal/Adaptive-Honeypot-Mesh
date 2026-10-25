@@ -11,13 +11,14 @@ import { logger } from "./logger.js";
  * @param {{ dir: string, service: string }} options
  * @returns {{ emit: (event: unknown) => boolean, close: () => void }}
  */
-export function createFileSink({ dir, service }) {
+export function createFileSink({ dir, service, logger: injectedLogger }) {
   const filePath = join(dir, `${service}.jsonl`);
+  const log = injectedLogger || logger;
   return {
     emit(event) {
       const result = validateEvent(event);
       if (!result.ok) {
-        logger.error({ errors: result.errors }, "Invalid event rejected by sink");
+        log.error({ errors: result.errors }, "Invalid event rejected by sink");
         return false;
       }
       try {
@@ -25,7 +26,7 @@ export function createFileSink({ dir, service }) {
         appendFileSync(filePath, `${JSON.stringify(result.data)}\n`, "utf8");
         return true;
       } catch (error) {
-        logger.error({ error: error.message }, "Event sink write failed");
+        log.error({ error: error.message }, "Event sink write failed");
         return false;
       }
     },

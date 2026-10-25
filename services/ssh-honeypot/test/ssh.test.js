@@ -9,6 +9,8 @@ import ssh2 from "ssh2";
 import { loadConfig } from "../../../packages/shared/src/config.js";
 import { validateEvent } from "../../../packages/shared/src/event.js";
 import { createFileSink } from "../../../packages/shared/src/event-sink.js";
+import { createLogger } from "../../../packages/shared/src/logger.js";
+const silentLogger = createLogger({ level: "silent" });
 import { generateEd25519HostKey } from "../src/hostkey.js";
 import { createSshHoneypot } from "../src/server.js";
 
@@ -34,8 +36,8 @@ function makeServer(overrides = {}) {
     SSH_HOST_KEY_PATH: hostKeyPath,
     ...overrides,
   });
-  const sink = createFileSink({ dir: eventsDir, service: "ssh" });
-  const honeypot = createSshHoneypot({ config, sink, hostKeyPath });
+  const sink = createFileSink({ dir: eventsDir, service: "ssh", logger: silentLogger });
+  const honeypot = createSshHoneypot({ config, sink, hostKeyPath, logger: silentLogger });
   return { dir, eventsDir, hostKeyPath, config, sink, honeypot };
 }
 
@@ -290,10 +292,10 @@ test("ssh: command event has command text, sessionId and source ip", async () =>
     assert.equal(await conn.waitReadyOrClose(), "ready");
     const stream = await openShell(conn.client);
     await waitForOutput(stream, "root@srv-web-01:~# ");
-    stream.write("whoami\r");
-    await waitForOutput(stream, "bash: whoami: command not found");
-    const events = await waitForEvents(made.eventsDir, (event) => event.eventType === "command" && event.payload.command === "whoami");
-    assert.equal(events[0].payload.command, "whoami");
+    stream.write("nmap\r");
+    await waitForOutput(stream, "bash: nmap: command not found");
+    const events = await waitForEvents(made.eventsDir, (event) => event.eventType === "command" && event.payload.command === "nmap");
+    assert.equal(events[0].payload.command, "nmap");
     assert.ok(typeof events[0].sessionId === "string" && events[0].sessionId.length > 0);
     assert.equal(events[0].source.ip, "127.0.0.1");
     assert.equal(validateEvent(events[0]).ok, true);
@@ -315,10 +317,10 @@ test("ssh: backspace editing logs the corrected command", async () => {
     await waitForOutput(stream, "root@srv-web-01:~# ");
     stream.write("ls");
     stream.write("\x7f\x7f");
-    stream.write("pwd\r");
-    await waitForOutput(stream, "bash: pwd: command not found");
-    const events = await waitForEvents(made.eventsDir, (event) => event.eventType === "command" && event.payload.command === "pwd");
-    assert.equal(events[0].payload.command, "pwd");
+    stream.write("nmap\r");
+    await waitForOutput(stream, "bash: nmap: command not found");
+    const events = await waitForEvents(made.eventsDir, (event) => event.eventType === "command" && event.payload.command === "nmap");
+    assert.equal(events[0].payload.command, "nmap");
     assert.equal(events[0].payload.usedBackspace, true);
     stream.end();
     conn.client.end();
@@ -445,8 +447,8 @@ test("ssh: all emitted events pass validateEvent", async () => {
     assert.equal(await conn.waitReadyOrClose(), "ready");
     const stream = await openShell(conn.client);
     await waitForOutput(stream, "root@srv-web-01:~# ");
-    stream.write("whoami\r");
-    await waitForOutput(stream, "bash: whoami: command not found");
+    stream.write("nmap\r");
+    await waitForOutput(stream, "bash: nmap: command not found");
     stream.write("exit\r");
     await conn.closePromise;
     await waitForEvents(made.eventsDir, (event) => event.eventType === "connection_close");
@@ -477,6 +479,163 @@ test("ssh: banner matches configured ident", async () => {
       socket.on("error", reject);
     });
     assert.equal(banner, "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.6");
+  } finally {
+    await made.honeypot.close();
+    rmSync(made.dir, { recursive: true, force: true });
+  }
+});
+
+test("ssh: prompt shows current directory after cd", async () => {
+  const made = await startServer();
+  try {
+    const conn = connectClient(made.port, { username: "root", password: "123456" });
+    assert.equal(await conn.waitReadyOrClose(), "ready");
+    const stream = await openShell(conn.client);
+    await waitForOutput(stream, "root@srv-web-01:~# ");
+    stream.write("cd /var/log\r");
+    await waitForOutput(stream, "root@srv-web-01:/var/log# ");
+    stream.end();
+    conn.client.end();
+    await conn.closePromise;
+  } finally {
+    await made.honeypot.close();
+    rmSync(made.dir, { recursive: true, force: true });
+  }
+});
+
+test("ssh: command event includes cwd, handled and exitCode", async () => {
+  const made = await startServer();
+  try {
+    const conn = connectClient(made.port, { username: "root", password: "123456" });
+    assert.equal(await conn.waitReadyOrClose(), "ready");
+    const stream = await openShell(conn.client);
+    await waitForOutput(stream, "root@srv-web-01:~# ");
+    stream.write("pwd\r");
+    await waitForOutput(stream, "/root");
+    const events = await waitForEvents(made.eventsDir, (event) => event.eventType === "command" && event.payload.command === "pwd");
+    assert.equal(events[0].payload.cwd, "/root");
+    assert.equal(events[0].payload.handled, true);
+    assert.equal(events[0].payload.exitCode, 0);
+    stream.end();
+    conn.client.end();
+    await conn.closePromise;
+  } finally {
+    await made.honeypot.close();
+    rmSync(made.dir, { recursive: true, force: true });
+  }
+});
+
+test("ssh: exit is logged as a command", async () => {
+  const made = await startServer();
+  try {
+    const conn = connectClient(made.port, { username: "root", password: "123456" });
+    assert.equal(await conn.waitReadyOrClose(), "ready");
+    const stream = await openShell(conn.client);
+    await waitForOutput(stream, "root@srv-web-01:~# ");
+    stream.write("exit\r");
+    await conn.closePromise;
+    const events = await waitForEvents(made.eventsDir, (event) => event.eventType === "command" && event.payload.command === "exit");
+    assert.equal(events[0].payload.command, "exit");
+    assert.equal(events[0].payload.source, "shell");
+    const closes = await waitForEvents(made.eventsDir, (event) => event.eventType === "connection_close");
+    assert.equal(closes[0].payload.commandCount >= 1, true);
+  } finally {
+    await made.honeypot.close();
+    rmSync(made.dir, { recursive: true, force: true });
+  }
+});
+
+test("ssh: exec runs through the command engine with exit codes", async () => {
+  const made = await startServer();
+  async function runExec(command) {
+    const conn = connectClient(made.port, { username: "root", password: "123456" });
+    assert.equal(await conn.waitReadyOrClose(), "ready");
+    const result = await new Promise((resolve, reject) => {
+      conn.client.exec(command, (error, stream) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        let output = "";
+        let code = null;
+        stream.on("data", (data) => {
+          output += data.toString();
+        });
+        stream.on("exit", (exitCode) => {
+          code = exitCode;
+        });
+        stream.on("close", () => resolve({ output, code }));
+      });
+    });
+    conn.client.end();
+    await conn.closePromise;
+    return result;
+  }
+  try {
+    const uname = await runExec("uname -a");
+    assert.equal(uname.code, 0);
+    assert.ok(uname.output.includes("Linux srv-web-01 5.15.0-91-generic"));
+    const nmap = await runExec("nmap");
+    assert.equal(nmap.code, 127);
+    assert.ok(nmap.output.includes("bash: nmap: command not found"));
+  } finally {
+    await made.honeypot.close();
+    rmSync(made.dir, { recursive: true, force: true });
+  }
+});
+
+test("ssh: connection_open carries client version", async () => {
+  const made = await startServer();
+  try {
+    const conn = connectClient(made.port, { username: "root", password: "123456", ident: "OpenSSH_9.6" });
+    assert.equal(await conn.waitReadyOrClose(), "ready");
+    const events = await waitForEvents(made.eventsDir, (event) => event.eventType === "connection_open");
+    assert.equal(events[0].payload.clientVersion, "OpenSSH_9.6");
+    conn.client.end();
+    await conn.closePromise;
+  } finally {
+    await made.honeypot.close();
+    rmSync(made.dir, { recursive: true, force: true });
+  }
+});
+
+test("ssh: none method does not count toward auth limit", async () => {
+  const made = await startServer({ SSH_MAX_AUTH_ATTEMPTS: 1 });
+  try {
+    const conn = connectClient(made.port, { username: "root", password: "wrong-password-xyz" });
+    await conn.closePromise;
+    const authEvents = await waitForEvents(made.eventsDir, (event) => event.eventType === "auth_attempt" && event.payload.method === "password");
+    assert.equal(authEvents[0].payload.success, false);
+    const noneEvents = await waitForEvents(made.eventsDir, (event) => event.eventType === "auth_attempt" && event.payload.method === "none");
+    assert.equal(noneEvents.length >= 1, true);
+    const closes = await waitForEvents(made.eventsDir, (event) => event.eventType === "connection_close" && event.payload.reason === "auth_limit");
+    assert.equal(closes[0].payload.reason, "auth_limit");
+  } finally {
+    await made.honeypot.close();
+    rmSync(made.dir, { recursive: true, force: true });
+  }
+});
+
+test("ssh: two sessions do not share cwd", async () => {
+  const made = await startServer();
+  try {
+    const first = connectClient(made.port, { username: "root", password: "123456" });
+    assert.equal(await first.waitReadyOrClose(), "ready");
+    const second = connectClient(made.port, { username: "root", password: "123456" });
+    assert.equal(await second.waitReadyOrClose(), "ready");
+    const firstStream = await openShell(first.client);
+    await waitForOutput(firstStream, "root@srv-web-01:~# ");
+    const secondStream = await openShell(second.client);
+    await waitForOutput(secondStream, "root@srv-web-01:~# ");
+    firstStream.write("cd /var/log\r");
+    await waitForOutput(firstStream, "root@srv-web-01:/var/log# ");
+    secondStream.write("pwd\r");
+    await waitForOutput(secondStream, "/root");
+    firstStream.end();
+    secondStream.end();
+    first.client.end();
+    second.client.end();
+    await Promise.all([first.closePromise, second.closePromise]);
   } finally {
     await made.honeypot.close();
     rmSync(made.dir, { recursive: true, force: true });

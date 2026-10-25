@@ -75,3 +75,27 @@ test("config: explicit model and fallback model are respected", () => {
   assert.equal(cfg.GEMINI_MODEL, "gemini-2.5-flash");
   assert.equal(cfg.GEMINI_FALLBACK_MODEL, "gemini-2.5-flash-lite");
 });
+
+test("config: LLM defaults load", () => {
+  const cfg = loadConfig({});
+  assert.equal(cfg.LLM_TIMEOUT_MS, 8000);
+  assert.equal(cfg.LLM_RPM, 8);
+  assert.equal(cfg.LLM_DAILY_LIMIT, 400);
+  assert.equal(cfg.LLM_SESSION_LIMIT, 40);
+  assert.equal(cfg.LLM_CACHE_MAX, 500);
+  assert.equal(cfg.LLM_CACHE_TTL_MS, 3600000);
+  assert.equal(cfg.LLM_MAX_OUTPUT_CHARS, 4000);
+  assert.equal(cfg.LLM_TEMPERATURE, 0.4);
+  assert.equal(cfg.GEMINI_THINKING_BUDGET, 0);
+  assert.equal(cfg.LLM_USAGE_FILE, "data/llm-usage.json");
+});
+
+test("config: invalid LLM limits are rejected", () => {
+  assert.throws(() => loadConfig({ LLM_TIMEOUT_MS: 0 }), /LLM_TIMEOUT_MS/);
+  assert.throws(() => loadConfig({ LLM_RPM: -1 }), /LLM_RPM/);
+  assert.throws(() => loadConfig({ LLM_DAILY_LIMIT: 0 }), /LLM_DAILY_LIMIT/);
+  assert.throws(() => loadConfig({ LLM_SESSION_LIMIT: 0 }), /LLM_SESSION_LIMIT/);
+  assert.throws(() => loadConfig({ LLM_CACHE_MAX: 0 }), /LLM_CACHE_MAX/);
+  assert.throws(() => loadConfig({ LLM_TEMPERATURE: 2 }), /LLM_TEMPERATURE/);
+  assert.throws(() => loadConfig({ GEMINI_THINKING_BUDGET: -1 }), /GEMINI_THINKING_BUDGET/);
+});

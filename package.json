@@ -1,1 +1,21 @@
-{"description":"LLM-Based Adaptive Honeypot Mesh","name":"honeypot-mesh","private":true,"scripts":{"check:gemini":"node tools/list-gemini-models.js","test:gemini":"node tools/test-gemini-call.js","lint:compose":"docker compose config -q","guard":"node tools/guard.js","start:ssh":"node services/ssh-honeypot/src/index.js","test":"node --test --test-reporter=spec packages/shared/test/config.test.js packages/shared/test/event.test.js packages/shared/test/logger.test.js packages/shared/test/sink.test.js services/ssh-honeypot/test/ssh.test.js"},"type":"module","version":"0.1.0","workspaces":["packages/shared","services/*"]}
+{
+  "description": "LLM-Based Adaptive Honeypot Mesh",
+  "name": "honeypot-mesh",
+  "private": true,
+  "scripts": {
+    "check:gemini": "node tools/list-gemini-models.js",
+    "test:gemini": "node tools/test-gemini-call.js",
+    "lint:compose": "docker compose config -q",
+    "guard": "node tools/guard.js",
+    "start:ssh": "node services/ssh-honeypot/src/index.js",
+    "test": "node --test --test-reporter=spec packages/shared/test/config.test.js packages/shared/test/event.test.js packages/shared/test/logger.test.js packages/shared/test/sink.test.js packages/llm/test/llm.test.js services/ssh-honeypot/test/vfs.test.js services/ssh-honeypot/test/parser.test.js services/ssh-honeypot/test/commands.test.js services/ssh-honeypot/test/ssh.test.js",
+    "llm:demo": "node tools/llm-demo.js"
+  },
+  "type": "module",
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/shared",
+    "packages/llm",
+    "services/*"
+  ]
+}

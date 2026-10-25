@@ -1,0 +1,1 @@
+{"dependencies":{"zod":"4.6.7"},"description":"Gemini service for the honeypot mesh","name":"@honeypot-mesh/llm","private":true,"type":"module","version":"0.1.0"}

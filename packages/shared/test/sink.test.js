@@ -5,6 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { createEvent, validateEvent } from "../src/event.js";
 import { createFileSink } from "../src/event-sink.js";
+import { createLogger } from "../src/logger.js";
+const silentLogger = createLogger({ level: "silent" });
 
 function validEvent() {
   return createEvent({
@@ -23,7 +25,7 @@ function tempDir() {
 test("sink: writes one valid JSON line per event", () => {
   const dir = tempDir();
   try {
-    const sink = createFileSink({ dir, service: "ssh" });
+    const sink = createFileSink({ dir, service: "ssh", logger: silentLogger });
     assert.equal(sink.emit(validEvent()), true);
     assert.equal(sink.emit(validEvent()), true);
     const lines = readFileSync(join(dir, "ssh.jsonl"), "utf8").trim().split("\n");
@@ -41,7 +43,7 @@ test("sink: writes one valid JSON line per event", () => {
 test("sink: rejects an invalid event without writing it", () => {
   const dir = tempDir();
   try {
-    const sink = createFileSink({ dir, service: "ssh" });
+    const sink = createFileSink({ dir, service: "ssh", logger: silentLogger });
     assert.equal(sink.emit({ notAnEvent: true }), false);
     assert.equal(existsSync(join(dir, "ssh.jsonl")), false);
   } finally {
@@ -54,7 +56,7 @@ test("sink: survives a write error without throwing", () => {
   try {
     const blocker = join(dir, "blocked");
     writeFileSync(blocker, "not a directory");
-    const sink = createFileSink({ dir: blocker, service: "ssh" });
+    const sink = createFileSink({ dir: blocker, service: "ssh", logger: silentLogger });
     assert.doesNotThrow(() => sink.emit(validEvent()));
     assert.equal(sink.emit(validEvent()), false);
   } finally {

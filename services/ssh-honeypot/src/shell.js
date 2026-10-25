@@ -4,20 +4,20 @@ export const MAX_SESSION_INPUT_BYTES = 1024 * 1024;
 /**
  * Create a shell session handler for one authenticated stream. The
  * handler echoes input, edits lines with backspace, and turns each
- * completed line into a command record. It never runs a command.
+ * completed line into a command run through the session engine.
  *
  * @param {object} options
  * @param {import("node:stream").Writable} options.stream
  * @param {string} options.username
  * @param {string} options.hostname
  * @param {string} options.sourceIp
+ * @param {object} options.engine
  * @param {(event: object) => void} options.onCommand
  * @param {() => void} options.onLogout
  * @param {(bytes: number) => void} [options.onBytesOut]
  * @returns {{ handleData: (data: Buffer) => void, prompt: () => void }}
  */
-export function createShellSession({ stream, username, hostname, sourceIp, onCommand, onLogout, onBytesOut }) {
-  const promptText = username === "root" ? `root@${hostname}:~# ` : `${username}@${hostname}:~$ `;
+export function createShellSession({ stream, username, hostname, sourceIp, engine, onCommand, onLogout, onBytesOut }) {
   let line = "";
   let keystrokeCount = 0;
   let usedBackspace = false;
@@ -34,7 +34,7 @@ export function createShellSession({ stream, username, hostname, sourceIp, onCom
   }
 
   function showPrompt() {
-    write(promptText);
+    write(engine.prompt());
   }
 
   function resetLine() {
@@ -56,12 +56,7 @@ export function createShellSession({ stream, username, hostname, sourceIp, onCom
       showPrompt();
       return;
     }
-    const trimmed = command.trim();
-    if (trimmed === "exit" || trimmed === "logout") {
-      onLogout();
-      return;
-    }
-    const firstWord = trimmed.split(/\s+/)[0];
+    const result = engine.run(command, { tty: true });
     onCommand({
       command,
       source: "shell",
@@ -69,8 +64,16 @@ export function createShellSession({ stream, username, hostname, sourceIp, onCom
       typingDurationMs: duration,
       usedBackspace: backspaced,
       truncated: wasTruncated,
+      cwd: result.cwd,
+      handled: result.handled,
+      exitCode: result.exitCode,
     });
-    write(`bash: ${firstWord}: command not found\r\n`);
+    if (result.shouldExit) {
+      onLogout();
+      return;
+    }
+    const output = result.output.replace(/\n/g, "\r\n");
+    if (output !== "") write(output);
     showPrompt();
   }
 
@@ -157,5 +160,7 @@ export function createShellSession({ stream, username, hostname, sourceIp, onCom
     showPrompt();
   }
 
+  void username;
+  void hostname;
   return { handleData, prompt: showPrompt, welcome };
 }

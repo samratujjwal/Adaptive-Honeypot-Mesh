@@ -7,6 +7,9 @@ import { logger } from "../../../packages/shared/src/logger.js";
 import { checkPassword, loadCredentials, publicKeyFingerprint } from "./auth.js";
 import { loadOrCreateHostKey } from "./hostkey.js";
 import { createShellSession, MAX_INPUT_LINE } from "./shell.js";
+import { createVfs } from "./vfs.js";
+import { buildSeed, uidForUser } from "./seed/ubuntu-2204.js";
+import { createCommandEngine } from "./commands.js";
 
 const { Server } = ssh2;
 const CLOSE_REASONS = ["client_exit", "idle_timeout", "max_duration", "auth_limit", "client_disconnect", "error"];
@@ -16,8 +19,10 @@ function defaultCredentialsPath() {
   return join(here, "..", "config", "credentials.json");
 }
 
-function clientVersionOf() {
-  return null;
+function clientVersionOf(info) {
+  const software = info && info.header && info.header.versions && info.header.versions.software;
+  if (typeof software !== "string" || software === "") return null;
+  return software.slice(0, 128);
 }
 
 /**
@@ -35,6 +40,7 @@ function clientVersionOf() {
  */
 export function createSshHoneypot(options) {
   const { config, sink } = options;
+  const log = options.logger || logger;
   const credentials = options.credentials || loadCredentials(options.credentialsPath || defaultCredentialsPath());
   const hostKeyPath = options.hostKeyPath || config.SSH_HOST_KEY_PATH;
   const hostKey = loadOrCreateHostKey(hostKeyPath);
@@ -107,6 +113,7 @@ export function createSshHoneypot(options) {
       startMs: Date.now(),
       commandCount: 0,
       authAttempts: 0,
+      failedAuthAttempts: 0,
       bytesIn: 0,
       bytesOut: 0,
       closeEmitted: false,
@@ -114,10 +121,11 @@ export function createSshHoneypot(options) {
       maxTimer: null,
       username: null,
       authenticated: false,
+      engine: null,
     };
     connections.set(session.sessionId, session);
     perIp.set(sourceIp, perIpCount + 1);
-    emitEvent(session, "connection_open", { clientVersion: clientVersionOf() });
+    emitEvent(session, "connection_open", { clientVersion: clientVersionOf(info) });
     resetIdle(session);
     if (config.SSH_MAX_SESSION_MS > 0) {
       session.maxTimer = setTimeout(() => {
@@ -137,29 +145,46 @@ export function createSshHoneypot(options) {
         const password = ctx.password || "";
         const success = checkPassword(username, password, credentials);
         emitEvent(session, "auth_attempt", { method, username, password, success });
-        logger.info({ method, username, success }, "auth attempt");
+        log.info({ method, username, success }, "auth attempt");
         if (success) {
           session.username = username;
           session.authenticated = true;
           ctx.accept();
           return;
         }
+        session.failedAuthAttempts += 1;
         ctx.reject(methodsLeft);
       } else if (method === "publickey") {
         const key = ctx.key || {};
         const fingerprint = key.data ? publicKeyFingerprint(key.data) : null;
         emitEvent(session, "auth_attempt", { method, username: ctx.username, keyFingerprint: fingerprint, success: false });
-        logger.info({ method, username: ctx.username, keyType: key.algo || null, keyFingerprint: fingerprint }, "auth attempt");
+        log.info({ method, username: ctx.username, keyType: key.algo || null, keyFingerprint: fingerprint }, "auth attempt");
+        session.failedAuthAttempts += 1;
         ctx.reject(methodsLeft);
       } else {
         emitEvent(session, "auth_attempt", { method, username: ctx.username, success: false });
-        logger.info({ method, username: ctx.username, success: false }, "auth attempt");
+        log.info({ method, username: ctx.username, success: false }, "auth attempt");
+        if (method === "keyboard-interactive") {
+          session.failedAuthAttempts += 1;
+        }
         ctx.reject(methodsLeft);
       }
-      if (session.authAttempts >= config.SSH_MAX_AUTH_ATTEMPTS) {
+      if (session.failedAuthAttempts >= config.SSH_MAX_AUTH_ATTEMPTS) {
         closeConnection(session, "auth_limit");
       }
     });
+
+    function getEngine() {
+      if (session.engine) return session.engine;
+      const vfs = createVfs(buildSeed(config.HONEYPOT_HOSTNAME));
+      vfs.ensureUserHome(session.username);
+      session.engine = createCommandEngine({
+        vfs,
+        user: { name: session.username, uid: uidForUser(session.username) },
+        hostname: config.HONEYPOT_HOSTNAME,
+      });
+      return session.engine;
+    }
 
     client.on("session", (accept, reject) => {
       if (!session.authenticated) {
@@ -181,6 +206,7 @@ export function createSshHoneypot(options) {
           username: session.username,
           hostname: config.HONEYPOT_HOSTNAME,
           sourceIp: session.sourceIp,
+          engine: getEngine(),
           onBytesOut: (bytes) => {
             session.bytesOut += bytes;
           },
@@ -211,7 +237,14 @@ export function createSshHoneypot(options) {
         resetIdle(session);
         const truncated = rawCommand.length > MAX_INPUT_LINE;
         const command = truncated ? rawCommand.slice(0, MAX_INPUT_LINE) : rawCommand;
-        const firstWord = command.trim().split(/\s+/)[0] || "";
+        if (command.trim() === "") {
+          stream.exit(0);
+          stream.end();
+          closeConnection(session, "client_exit");
+          return;
+        }
+        const engine = getEngine();
+        const result = engine.run(command, { tty: false });
         session.commandCount += 1;
         emitEvent(session, "command", {
           command,
@@ -220,11 +253,13 @@ export function createSshHoneypot(options) {
           typingDurationMs: 0,
           usedBackspace: false,
           truncated,
+          cwd: result.cwd,
+          handled: result.handled,
+          exitCode: result.exitCode,
         });
-        const reply = `bash: ${firstWord}: command not found\r\n`;
-        session.bytesOut += Buffer.byteLength(reply, "utf8");
-        stream.write(reply);
-        stream.exit(127);
+        session.bytesOut += Buffer.byteLength(result.output, "utf8");
+        if (result.output !== "") stream.write(result.output);
+        stream.exit(result.exitCode);
         stream.end();
         closeConnection(session, "client_exit");
       });
