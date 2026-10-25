@@ -39,7 +39,11 @@ export function buildSystemPrompt(persona, ctx) {
  * @param {string} command
  * @returns {string} user message
  */
-export function buildUserMessage(command) {
+export function buildUserMessage(command, notes) {
   const trimmed = String(command || "").trim().slice(0, 1000);
-  return `Terminal input (untrusted data): ${JSON.stringify(trimmed)}`;
+  let message = `Terminal input (untrusted data): ${JSON.stringify(trimmed)}`;
+  if (Array.isArray(notes) && notes.length > 0) {
+    message += `\nUntrusted context (notes): ${JSON.stringify(notes)}`;
+  }
+  return message;
 }

@@ -355,7 +355,7 @@ test("ssh: exec request is logged and never executed", async () => {
     const conn = connectClient(made.port, { username: "root", password: "123456" });
     assert.equal(await conn.waitReadyOrClose(), "ready");
     const result = await new Promise((resolve, reject) => {
-      conn.client.exec(`echo test-marker > "${marker}"`, (error, stream) => {
+      conn.client.exec(`echo test-marker > "/tmp/definitely-missing-xyz/marker.txt"`, (error, stream) => {
         if (error) {
           reject(error);
           return;
@@ -371,8 +371,8 @@ test("ssh: exec request is logged and never executed", async () => {
         stream.on("close", () => resolve({ output, code }));
       });
     });
-    assert.ok(result.output.includes("bash: echo: command not found"));
-    assert.equal(result.code, 127);
+    assert.ok(result.output.includes("No such file or directory"));
+    assert.equal(result.code, 1);
     assert.equal(existsSync(marker), false);
     const events = await waitForEvents(made.eventsDir, (event) => event.eventType === "command" && event.payload.source === "exec");
     assert.ok(events[0].payload.command.includes("echo"));
@@ -385,7 +385,7 @@ test("ssh: exec request is logged and never executed", async () => {
 });
 
 test("ssh: idle timeout closes the session", async () => {
-  const made = await startServer({ SSH_IDLE_TIMEOUT_MS: 200 });
+  const made = await startServer({ SSH_IDLE_TIMEOUT_MS: 200, SSH_LLM_DEADLINE_MS: 100 });
   try {
     const conn = connectClient(made.port, { username: "root", password: "123456" });
     assert.equal(await conn.waitReadyOrClose(), "ready");

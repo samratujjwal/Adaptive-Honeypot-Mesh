@@ -10,6 +10,7 @@ import { createShellSession, MAX_INPUT_LINE } from "./shell.js";
 import { createVfs } from "./vfs.js";
 import { buildSeed, uidForUser } from "./seed/ubuntu-2204.js";
 import { createCommandEngine } from "./commands.js";
+import { toEventLlm } from "../../../packages/llm/src/service.js";
 
 const { Server } = ssh2;
 const CLOSE_REASONS = ["client_exit", "idle_timeout", "max_duration", "auth_limit", "client_disconnect", "error"];
@@ -49,14 +50,16 @@ export function createSshHoneypot(options) {
   const perIp = new Map();
   let server = null;
 
-  function emitEvent(session, eventType, payload) {
-    const event = createEvent({
+  function emitEvent(session, eventType, payload, llmField) {
+    const eventInput = {
       honeypot: { service: "ssh", nodeId: config.NODE_ID },
       sessionId: session.sessionId,
       source: { ip: session.sourceIp, port: session.sourcePort },
       eventType,
       payload,
-    });
+    };
+    if (llmField) eventInput.llm = llmField;
+    const event = createEvent(eventInput);
     sink.emit(event);
     return event;
   }
@@ -84,6 +87,10 @@ export function createSshHoneypot(options) {
 
   function resetIdle(session) {
     if (session.idleTimer) clearTimeout(session.idleTimer);
+    if (session.shellSession && typeof session.shellSession.isPending === "function" && session.shellSession.isPending()) {
+      session.idleTimer = null;
+      return;
+    }
     if (config.SSH_IDLE_TIMEOUT_MS > 0) {
       session.idleTimer = setTimeout(() => {
         closeConnection(session, "idle_timeout");
@@ -182,8 +189,41 @@ export function createSshHoneypot(options) {
         vfs,
         user: { name: session.username, uid: uidForUser(session.username) },
         hostname: config.HONEYPOT_HOSTNAME,
+        llm: options.llmService || options.llm || null,
+        config,
+        sessionId: session.sessionId,
+        sourceIp: session.sourceIp,
       });
       return session.engine;
+    }
+
+    function emitLlmAndTransfer(session, commandText, result) {
+      const handledBy = result.handledBy || (result.meta ? "llm" : "engine");
+      if ((handledBy === "llm" || handledBy === "cache" || handledBy === "mock") && result.meta) {
+        try {
+          const llmField = toEventLlm(result.meta);
+          emitEvent(session, "llm_response", {
+            command: commandText,
+            exitCode: result.exitCode,
+            outputLength: Buffer.byteLength(result.output || "", "utf8"),
+            outputPreview: String(result.output || "").slice(0, 500),
+          }, llmField);
+        } catch {
+          /* Event emission must never break the session. */
+        }
+      }
+      if (result.transfer) {
+        try {
+          emitEvent(session, "file_transfer", {
+            tool: result.transfer.tool,
+            url: result.transfer.url,
+            savedAs: result.transfer.savedAs,
+            direction: result.transfer.direction || "download",
+          });
+        } catch {
+          /* Ignore. */
+        }
+      }
     }
 
     client.on("session", (accept, reject) => {
@@ -207,17 +247,44 @@ export function createSshHoneypot(options) {
           hostname: config.HONEYPOT_HOSTNAME,
           sourceIp: session.sourceIp,
           engine: getEngine(),
+          maxPendingInput: config.SSH_MAX_PENDING_INPUT,
+          onPendingChange: (isPending) => {
+            if (isPending) {
+              if (session.idleTimer) clearTimeout(session.idleTimer);
+              session.idleTimer = null;
+            } else {
+              resetIdle(session);
+            }
+          },
           onBytesOut: (bytes) => {
             session.bytesOut += bytes;
           },
           onCommand: (commandRecord) => {
             session.commandCount += 1;
-            emitEvent(session, "command", commandRecord);
+            const commandPayload = {
+              command: commandRecord.command,
+              source: commandRecord.source,
+              keystrokeCount: commandRecord.keystrokeCount,
+              typingDurationMs: commandRecord.typingDurationMs,
+              usedBackspace: commandRecord.usedBackspace,
+              truncated: commandRecord.truncated,
+              cwd: commandRecord.cwd,
+              handled: commandRecord.handled,
+              exitCode: commandRecord.exitCode,
+              handledBy: commandRecord.handledBy || "engine",
+            };
+            emitEvent(session, "command", commandPayload);
+            if (commandRecord.llmMeta) {
+              emitLlmAndTransfer(session, commandRecord.command, { output: commandRecord.output || "", exitCode: commandRecord.exitCode, handledBy: commandRecord.handledBy, meta: commandRecord.llmMeta, transfer: commandRecord.transfer });
+            } else if (commandRecord.transfer) {
+              emitLlmAndTransfer(session, commandRecord.command, { output: commandRecord.output || "", exitCode: commandRecord.exitCode, handledBy: commandRecord.handledBy, meta: null, transfer: commandRecord.transfer });
+            }
           },
           onLogout: () => {
             closeConnection(session, "client_exit");
           },
         });
+        session.shellSession = shellSession;
         stream.on("data", (data) => {
           session.bytesIn += data.length;
           resetIdle(session);
@@ -234,7 +301,8 @@ export function createSshHoneypot(options) {
         const stream = execAccept();
         const rawCommand = (info && info.command) || "";
         session.bytesIn += Buffer.byteLength(rawCommand, "utf8");
-        resetIdle(session);
+        if (session.idleTimer) clearTimeout(session.idleTimer);
+        session.idleTimer = null;
         const truncated = rawCommand.length > MAX_INPUT_LINE;
         const command = truncated ? rawCommand.slice(0, MAX_INPUT_LINE) : rawCommand;
         if (command.trim() === "") {
@@ -244,24 +312,31 @@ export function createSshHoneypot(options) {
           return;
         }
         const engine = getEngine();
-        const result = engine.run(command, { tty: false });
-        session.commandCount += 1;
-        emitEvent(session, "command", {
-          command,
-          source: "exec",
-          keystrokeCount: 0,
-          typingDurationMs: 0,
-          usedBackspace: false,
-          truncated,
-          cwd: result.cwd,
-          handled: result.handled,
-          exitCode: result.exitCode,
+        Promise.resolve(engine.run(command, { tty: false })).then((result) => {
+          session.commandCount += 1;
+          emitEvent(session, "command", {
+            command,
+            source: "exec",
+            keystrokeCount: 0,
+            typingDurationMs: 0,
+            usedBackspace: false,
+            truncated,
+            cwd: result.cwd,
+            handled: result.handled,
+            exitCode: result.exitCode,
+            handledBy: result.handledBy || "engine",
+          });
+          emitLlmAndTransfer(session, command, result);
+          session.bytesOut += Buffer.byteLength(result.output, "utf8");
+          if (result.output !== "") stream.write(result.output);
+          stream.exit(result.exitCode);
+          stream.end();
+          closeConnection(session, "client_exit");
+        }).catch(() => {
+          stream.exit(1);
+          stream.end();
+          closeConnection(session, "client_exit");
         });
-        session.bytesOut += Buffer.byteLength(result.output, "utf8");
-        if (result.output !== "") stream.write(result.output);
-        stream.exit(result.exitCode);
-        stream.end();
-        closeConnection(session, "client_exit");
       });
     });
 

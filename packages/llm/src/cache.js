@@ -21,14 +21,30 @@ export function isTimeDependent(command) {
  * @param {object} parts
  * @returns {string} sha256 hex key
  */
+export function capNotes(notes) {
+  if (!Array.isArray(notes)) return [];
+  const capped = notes.map((note) => String(note).trim().slice(0, 120)).filter((note) => note !== "");
+  return capped.slice(-10);
+}
+
+export function notesDigest(notes) {
+  const capped = capNotes(notes);
+  return createHash("sha256").update(JSON.stringify(capped), "utf8").digest("hex");
+}
+
 export function makeKey(parts) {
   const normalized = String(parts.command || "").trim().replace(/\s+/g, " ");
+  let digest = "";
+  if (typeof parts.notesDigest === "string") digest = parts.notesDigest;
+  else if (Array.isArray(parts.notes)) digest = notesDigest(parts.notes);
+  else digest = notesDigest([]);
   const payload = JSON.stringify({
     personaId: parts.personaId,
     hostname: parts.hostname,
     user: parts.user,
     cwd: parts.cwd,
     command: normalized,
+    notesDigest: digest,
   });
   return createHash("sha256").update(payload, "utf8").digest("hex");
 }

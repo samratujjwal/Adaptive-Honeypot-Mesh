@@ -8,7 +8,7 @@
     "lint:compose": "docker compose config -q",
     "guard": "node tools/guard.js",
     "start:ssh": "node services/ssh-honeypot/src/index.js",
-    "test": "node --test --test-reporter=spec packages/shared/test/config.test.js packages/shared/test/event.test.js packages/shared/test/logger.test.js packages/shared/test/sink.test.js packages/llm/test/llm.test.js services/ssh-honeypot/test/vfs.test.js services/ssh-honeypot/test/parser.test.js services/ssh-honeypot/test/commands.test.js services/ssh-honeypot/test/ssh.test.js",
+    "test": "node --test --test-reporter=spec packages/shared/test/config.test.js packages/shared/test/event.test.js packages/shared/test/logger.test.js packages/shared/test/sink.test.js packages/llm/test/llm.test.js services/ssh-honeypot/test/vfs.test.js services/ssh-honeypot/test/parser.test.js services/ssh-honeypot/test/commands.test.js services/ssh-honeypot/test/ssh.test.js services/ssh-honeypot/test/day5.test.js",
     "llm:demo": "node tools/llm-demo.js"
   },
   "type": "module",

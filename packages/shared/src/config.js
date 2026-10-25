@@ -20,6 +20,11 @@ const configSchema = z
     SSH_MAX_CONNECTIONS: z.coerce.number().int().min(1).default(50),
     SSH_MAX_CONNECTIONS_PER_IP: z.coerce.number().int().min(1).default(5),
     SSH_MAX_AUTH_ATTEMPTS: z.coerce.number().int().min(1).default(6),
+    SSH_LLM_DEADLINE_MS: z.coerce.number().int().min(1).default(8000),
+    SSH_MAX_FILE_BYTES: z.coerce.number().int().min(1).default(65536),
+    SSH_MAX_NODES: z.coerce.number().int().min(1).default(2000),
+    SSH_MAX_PENDING_INPUT: z.coerce.number().int().min(1).default(4096),
+    HONEYPOT_STATIC_FIRST: z.union([z.boolean(), z.enum(["true", "false"])]).transform((value) => value === true || value === "true").default(true),
     SSH_IDENT: z.string().min(1).default("OpenSSH_8.9p1 Ubuntu-3ubuntu0.6"),
     HONEYPOT_HOSTNAME: z.string().min(1).default("srv-web-01"),
     ALLOW_PUBLIC_BIND: z
@@ -54,6 +59,9 @@ const configSchema = z
         path: ["GEMINI_API_KEY"],
         message: "GEMINI_API_KEY is required when LLM_MODE is 'real'",
       });
+    }
+    if (value.SSH_LLM_DEADLINE_MS >= value.SSH_IDLE_TIMEOUT_MS) {
+      ctx.addIssue({ code: "custom", path: ["SSH_LLM_DEADLINE_MS"], message: "SSH_LLM_DEADLINE_MS must be less than SSH_IDLE_TIMEOUT_MS" });
     }
     if ((value.BIND_HOST === "0.0.0.0" || value.BIND_HOST === "::") && !value.ALLOW_PUBLIC_BIND) {
       ctx.addIssue({

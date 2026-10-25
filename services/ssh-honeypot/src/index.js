@@ -1,11 +1,13 @@
 import { config } from "../../../packages/shared/src/config.js";
 import { createFileSink } from "../../../packages/shared/src/event-sink.js";
 import { logger } from "../../../packages/shared/src/logger.js";
+import { createLlmService } from "../../../packages/llm/src/service.js";
 import { createSshHoneypot } from "./server.js";
 
 async function main() {
   const sink = createFileSink({ dir: config.EVENT_DIR, service: "ssh" });
-  const honeypot = createSshHoneypot({ config, sink });
+  const llmService = createLlmService({ config, logger });
+  const honeypot = createSshHoneypot({ config, sink, llmService });
   try {
     await honeypot.listen(config.SSH_PORT, config.BIND_HOST);
   } catch (error) {

@@ -108,3 +108,25 @@ test("config: LLM_MAX_OUTPUT_TOKENS defaults and validates", () => {
   assert.throws(() => loadConfig({ LLM_MAX_OUTPUT_TOKENS: -1 }), /LLM_MAX_OUTPUT_TOKENS/);
   assert.throws(() => loadConfig({ LLM_MAX_OUTPUT_TOKENS: 1.5 }), /LLM_MAX_OUTPUT_TOKENS/);
 });
+
+test("config: SSH_LLM_DEADLINE_MS defaults and validates", () => {
+  const cfg = loadConfig({});
+  assert.equal(cfg.SSH_LLM_DEADLINE_MS, 8000);
+  assert.equal(cfg.SSH_MAX_FILE_BYTES, 65536);
+  assert.equal(cfg.SSH_MAX_NODES, 2000);
+  assert.equal(cfg.SSH_MAX_PENDING_INPUT, 4096);
+  assert.equal(loadConfig({ SSH_LLM_DEADLINE_MS: 1000 }).SSH_LLM_DEADLINE_MS, 1000);
+  assert.throws(() => loadConfig({ SSH_LLM_DEADLINE_MS: 0 }), /SSH_LLM_DEADLINE_MS/);
+  assert.throws(() => loadConfig({ SSH_LLM_DEADLINE_MS: -1 }), /SSH_LLM_DEADLINE_MS/);
+  assert.throws(() => loadConfig({ SSH_LLM_DEADLINE_MS: 1.5 }), /SSH_LLM_DEADLINE_MS/);
+  assert.throws(() => loadConfig({ SSH_LLM_DEADLINE_MS: 200000 }), /SSH_LLM_DEADLINE_MS/);
+  assert.throws(() => loadConfig({ SSH_MAX_FILE_BYTES: 0 }), /SSH_MAX_FILE_BYTES/);
+  assert.throws(() => loadConfig({ SSH_MAX_NODES: 0 }), /SSH_MAX_NODES/);
+  assert.throws(() => loadConfig({ SSH_MAX_PENDING_INPUT: 0 }), /SSH_MAX_PENDING_INPUT/);
+});
+
+test("config: HONEYPOT_STATIC_FIRST defaults to true", () => {
+  assert.equal(loadConfig({}).HONEYPOT_STATIC_FIRST, true);
+  assert.equal(loadConfig({ HONEYPOT_STATIC_FIRST: "false" }).HONEYPOT_STATIC_FIRST, false);
+  assert.equal(loadConfig({ HONEYPOT_STATIC_FIRST: "true" }).HONEYPOT_STATIC_FIRST, true);
+});

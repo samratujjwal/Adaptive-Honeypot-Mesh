@@ -86,6 +86,61 @@ export function createVfs(seed) {
     return (bits & 4) !== 0;
   }
 
+  function canWrite(user, node) {
+    if (!node) return false;
+    if (user && user.uid === 0) return true;
+    const mode = String(node.mode || "0644");
+    const ownerBit = Number.parseInt(mode[mode.length - 3], 10);
+    const groupBit = Number.parseInt(mode[mode.length - 2], 10);
+    const otherBit = Number.parseInt(mode[mode.length - 1], 10);
+    let bits;
+    if (user && node.owner === user.name) bits = ownerBit;
+    else if (user && node.group === user.name) bits = groupBit;
+    else bits = otherBit;
+    return (bits & 2) !== 0;
+  }
+
+  function countNodes() {
+    let count = 0;
+    function walk(node) {
+      count += 1;
+      if (node.type === "dir") {
+        for (const child of Object.values(node.children || {})) walk(child);
+      }
+    }
+    walk(root);
+    return count;
+  }
+
+  function parentAndName(absPath) {
+    const parts = absPath.split("/").filter((part) => part !== "");
+    const name = parts.pop() || "";
+    const parentPath = "/" + parts.join("/");
+    return { parent: get(parentPath), name, parentPath };
+  }
+
+  function mkdirNode(absPath, node) {
+    const { parent, name } = parentAndName(absPath);
+    if (!parent || parent.type !== "dir" || !name || parent.children[name]) return false;
+    parent.children[name] = node;
+    return true;
+  }
+
+  function removeNode(absPath) {
+    const { parent, name } = parentAndName(absPath);
+    if (!parent || parent.type !== "dir" || !name || !parent.children[name]) return null;
+    const removed = parent.children[name];
+    delete parent.children[name];
+    return removed;
+  }
+
+  function setNode(absPath, node) {
+    const { parent, name } = parentAndName(absPath);
+    if (!parent || parent.type !== "dir" || !name) return false;
+    parent.children[name] = node;
+    return true;
+  }
+
   function ensureUserHome(username) {
     const home = username === "root" ? "/root" : `/home/${username}`;
     const homeNode = get(home);
@@ -123,6 +178,11 @@ export function createVfs(seed) {
     list,
     readFile,
     canRead,
+    canWrite,
+    countNodes,
+    mkdirNode,
+    removeNode,
+    setNode,
     ensureUserHome,
   };
 }

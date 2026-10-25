@@ -3,8 +3,9 @@ export const MAX_SESSION_INPUT_BYTES = 1024 * 1024;
 
 /**
  * Create a shell session handler for one authenticated stream. The
- * handler echoes input, edits lines with backspace, and turns each
- * completed line into a command run through the session engine.
+ * handler echoes input, edits lines with backspace, queues input
+ * typed while a command is pending, and turns each completed line
+ * into an async command run through the session engine.
  *
  * @param {object} options
  * @param {import("node:stream").Writable} options.stream
@@ -15,9 +16,11 @@ export const MAX_SESSION_INPUT_BYTES = 1024 * 1024;
  * @param {(event: object) => void} options.onCommand
  * @param {() => void} options.onLogout
  * @param {(bytes: number) => void} [options.onBytesOut]
- * @returns {{ handleData: (data: Buffer) => void, prompt: () => void }}
+ * @param {number} [options.maxPendingInput]
+ * @param {(pending: boolean) => void} [options.onPendingChange]
+ * @returns {{ handleData: (data: Buffer) => void, prompt: () => void, welcome: () => void, isPending: () => boolean }}
  */
-export function createShellSession({ stream, username, hostname, sourceIp, engine, onCommand, onLogout, onBytesOut }) {
+export function createShellSession({ stream, username, hostname, sourceIp, engine, onCommand, onLogout, onBytesOut, maxPendingInput, onPendingChange }) {
   let line = "";
   let keystrokeCount = 0;
   let usedBackspace = false;
@@ -26,6 +29,13 @@ export function createShellSession({ stream, username, hostname, sourceIp, engin
   let totalInputBytes = 0;
   let escapeState = 0;
   let lastWasEnter = false;
+  let pending = false;
+  let pendingController = null;
+  let suppressPrompt = false;
+  let queue = [];
+  let queuedBytes = 0;
+  let pendingDropped = false;
+  const pendingCap = typeof maxPendingInput === "number" ? maxPendingInput : 4096;
 
   function write(data) {
     const text = String(data);
@@ -45,36 +55,101 @@ export function createShellSession({ stream, username, hostname, sourceIp, engin
     lineStartMs = null;
   }
 
-  function finishLine() {
-    const command = line;
-    const count = keystrokeCount;
-    const backspaced = usedBackspace;
-    const wasTruncated = truncated;
-    const duration = lineStartMs === null ? 0 : Date.now() - lineStartMs;
-    resetLine();
-    if (command === "") {
-      showPrompt();
-      return;
+  function setPending(value) {
+    if (pending === value) return;
+    pending = value;
+    if (typeof onPendingChange === "function") {
+      try {
+        onPendingChange(value);
+      } catch {
+        /* Idle handling must never break the shell. */
+      }
     }
-    const result = engine.run(command, { tty: true });
-    onCommand({
+  }
+
+  async function runCommand(command, metadata) {
+    const controller = new AbortController();
+    pendingController = controller;
+    setPending(true);
+    let result;
+    try {
+      result = await engine.run(command, { tty: true, signal: controller.signal });
+    } catch {
+      result = { output: "", exitCode: 1, handled: false, cwd: engine.cwd(), handledBy: "engine", shouldExit: false };
+    } finally {
+      pendingController = null;
+      setPending(false);
+    }
+    const wasSuppressed = suppressPrompt;
+    if (wasSuppressed) suppressPrompt = false;
+    const record = {
       command,
       source: "shell",
-      keystrokeCount: count,
-      typingDurationMs: duration,
-      usedBackspace: backspaced,
-      truncated: wasTruncated,
+      keystrokeCount: metadata.keystrokeCount,
+      typingDurationMs: metadata.typingDurationMs,
+      usedBackspace: metadata.usedBackspace,
+      truncated: metadata.truncated || pendingDropped,
       cwd: result.cwd,
       handled: result.handled,
       exitCode: result.exitCode,
-    });
+      handledBy: result.handledBy || "engine",
+    };
+    if (result.meta) record.llmMeta = result.meta;
+    if (result.transfer) record.transfer = result.transfer;
+    record.output = result.output || "";
+    if (pendingDropped) pendingDropped = false;
+    onCommand(record);
     if (result.shouldExit) {
       onLogout();
+      return;
+    }
+    if (result.handledBy === "aborted") {
+      if (!wasSuppressed) {
+        write("^C\r\n");
+        showPrompt();
+      }
+      processQueue();
       return;
     }
     const output = result.output.replace(/\n/g, "\r\n");
     if (output !== "") write(output);
     showPrompt();
+    processQueue();
+  }
+
+  function processQueue() {
+    if (pending) return;
+    if (queue.length === 0) return;
+    const next = queue.shift();
+    queuedBytes -= Buffer.byteLength(next.command, "utf8");
+    if (queuedBytes < 0) queuedBytes = 0;
+    void runCommand(next.command, next.metadata);
+  }
+
+  function finishLine() {
+    const command = line;
+    const metadata = {
+      keystrokeCount,
+      typingDurationMs: lineStartMs === null ? 0 : Date.now() - lineStartMs,
+      usedBackspace,
+      truncated,
+    };
+    resetLine();
+    if (command === "") {
+      if (!pending) showPrompt();
+      return;
+    }
+    if (pending) {
+      const bytes = Buffer.byteLength(command, "utf8");
+      if (queuedBytes + bytes > pendingCap) {
+        pendingDropped = true;
+        return;
+      }
+      queue.push({ command, metadata });
+      queuedBytes += bytes;
+      return;
+    }
+    void runCommand(command, metadata);
   }
 
   function handleData(data) {
@@ -113,13 +188,27 @@ export function createShellSession({ stream, username, hostname, sourceIp, engin
       }
       lastWasEnter = false;
       if (byte === 0x03) {
+        if (pending && pendingController) {
+          suppressPrompt = true;
+          try {
+            pendingController.abort();
+          } catch {
+            /* Ignore. */
+          }
+          queue = [];
+          queuedBytes = 0;
+          resetLine();
+          write("^C\r\n");
+          showPrompt();
+          continue;
+        }
         write("^C\r\n");
         resetLine();
         showPrompt();
         continue;
       }
       if (byte === 0x04) {
-        if (line === "") {
+        if (line === "" && !pending) {
           onLogout();
         }
         continue;
@@ -162,5 +251,5 @@ export function createShellSession({ stream, username, hostname, sourceIp, engin
 
   void username;
   void hostname;
-  return { handleData, prompt: showPrompt, welcome };
+  return { handleData, prompt: showPrompt, welcome, isPending: () => pending };
 }

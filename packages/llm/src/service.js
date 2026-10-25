@@ -1,7 +1,7 @@
 import { makePersona } from "./persona.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt.js";
 import { parseModelOutput } from "./output.js";
-import { createCache, isTimeDependent, makeKey } from "./cache.js";
+import { createCache, isTimeDependent, makeKey, capNotes, notesDigest } from "./cache.js";
 import { createLimiter } from "./limiter.js";
 import { createGeminiClient } from "./gemini.js";
 import { staticRespond } from "./static.js";
@@ -92,6 +92,8 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
     const cwd = safeCtx.cwd || "/root";
     const hostname = safeCtx.hostname || config.HONEYPOT_HOSTNAME;
     const sessionId = safeCtx.sessionId || "unknown";
+    const cappedNotes = capNotes(safeCtx.notes);
+    const digest = notesDigest(cappedNotes);
     const persona = makePersona(hostname);
     const trimmedCommand = String(command || "").trim();
     let attempts = [];
@@ -123,7 +125,7 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
         });
       }
       const timeDependent = isTimeDependent(trimmedCommand);
-      const key = makeKey({ personaId: persona.id, hostname, user, cwd, command: trimmedCommand });
+      const key = makeKey({ personaId: persona.id, hostname, user, cwd, command: trimmedCommand, notesDigest: digest });
       if (!timeDependent) {
         const cached = cache.get(key);
         if (cached) {
@@ -138,7 +140,7 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
         }
       }
       const system = buildSystemPrompt(persona, { user, cwd });
-      const userMessage = buildUserMessage(trimmedCommand);
+      const userMessage = buildUserMessage(trimmedCommand, cappedNotes);
       const primaryAcquire = limiter.tryAcquire(sessionId);
       if (!primaryAcquire.ok) {
         return staticFinish(`rate:${primaryAcquire.reason}`);
