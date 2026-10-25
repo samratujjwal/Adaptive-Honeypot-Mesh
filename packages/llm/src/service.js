@@ -3,7 +3,9 @@ import { buildSystemPrompt, buildUserMessage } from "./prompt.js";
 import { parseModelOutput } from "./output.js";
 import { createCache, isTimeDependent, makeKey, capNotes, notesDigest } from "./cache.js";
 import { createLimiter } from "./limiter.js";
-import { createGeminiClient } from "./gemini.js";
+import { createGeminiClient, HTTP_RESPONSE_SCHEMA } from "./gemini.js";
+import { buildHttpSystemPrompt, buildHttpUserMessage } from "./http-prompt.js";
+import { parseHttpOutput } from "./http-output.js";
 import { staticRespond } from "./static.js";
 
 function noOpLogger() {
@@ -205,5 +207,57 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
     }
   }
 
-  return { respond, toEventLlm };
+  async function respondHttp({ request, ctx }) {
+    const startMs = Date.now();
+    const safeCtx = ctx || {};
+    const hostname = safeCtx.hostname || config.HONEYPOT_HOSTNAME;
+    const sessionId = safeCtx.sessionId || "unknown";
+    const authenticated = Boolean(safeCtx.authenticated);
+    const persona = makePersona(hostname);
+    try {
+      if (config.LLM_MODE === "mock") return { ok: false };
+      const req = request || {};
+      const method = String(req.method || "GET").toUpperCase();
+      const path = String(req.path || "/");
+      const query = String(req.query || "");
+      const isGet = method === "GET";
+      const key = isGet ? makeKey({ personaId: "http", hostname, user: authenticated ? "authenticated" : "anonymous", cwd: method, command: `${path}?${query}`, notesDigest: "" }) : null;
+      if (isGet && key) {
+        const cached = cache.get(key);
+        if (cached && typeof cached.status === "number") {
+          return { ok: true, status: cached.status, contentType: cached.contentType, body: cached.body, meta: { source: "cache", model: cached.model || "static", cached: true, fallback: Boolean(cached.fallback), latencyMs: Math.max(0, Date.now() - startMs), reason: null, attempts: [] } };
+        }
+      }
+      const system = buildHttpSystemPrompt(persona);
+      const userMessage = buildHttpUserMessage({ method, path, query, headers: req.headers || {}, bodyPreview: req.bodyPreview || "" });
+      let attempts = [];
+      const primaryAcquire = limiter.tryAcquire(sessionId);
+      if (!primaryAcquire.ok) return { ok: false };
+      const primary = await client.generate({ model: config.GEMINI_MODEL, system, user: userMessage, schema: HTTP_RESPONSE_SCHEMA });
+      if (primary.attempt) attempts.push(cleanAttempt(primary.attempt, apiKey));
+      if (primary.ok) {
+        const parsed = parseHttpOutput(primary.text);
+        if (parsed.ok) {
+          if (isGet && key) cache.set(key, { status: parsed.status, contentType: parsed.contentType, body: parsed.body, model: config.GEMINI_MODEL, fallback: false });
+          return { ok: true, status: parsed.status, contentType: parsed.contentType, body: parsed.body, meta: { source: "llm", model: config.GEMINI_MODEL, cached: false, fallback: false, latencyMs: Math.max(0, Date.now() - startMs), reason: attempts.map((a) => `${a.model}:${a.errorKind || "ok"}`).join(";"), attempts: attempts.slice(0, 3) } };
+        }
+      }
+      const fallbackAcquire = limiter.tryAcquire(sessionId);
+      if (!fallbackAcquire.ok) return { ok: false };
+      const fallbackResult = await client.generate({ model: config.GEMINI_FALLBACK_MODEL, system, user: userMessage, schema: HTTP_RESPONSE_SCHEMA });
+      if (fallbackResult.attempt) attempts.push(cleanAttempt(fallbackResult.attempt, apiKey));
+      if (fallbackResult.ok) {
+        const fallbackParsed = parseHttpOutput(fallbackResult.text);
+        if (fallbackParsed.ok) {
+          if (isGet && key) cache.set(key, { status: fallbackParsed.status, contentType: fallbackParsed.contentType, body: fallbackParsed.body, model: config.GEMINI_FALLBACK_MODEL, fallback: true });
+          return { ok: true, status: fallbackParsed.status, contentType: fallbackParsed.contentType, body: fallbackParsed.body, meta: { source: "llm", model: config.GEMINI_FALLBACK_MODEL, cached: false, fallback: true, latencyMs: Math.max(0, Date.now() - startMs), reason: attempts.map((a) => `${a.model}:${a.errorKind || "ok"}`).join(";"), attempts: attempts.slice(0, 3) } };
+        }
+      }
+      return { ok: false };
+    } catch {
+      return { ok: false };
+    }
+  }
+
+  return { respond, respondHttp, toEventLlm };
 }

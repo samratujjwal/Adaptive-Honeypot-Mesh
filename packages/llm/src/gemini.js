@@ -53,6 +53,17 @@ function stripKeyFromText(text, apiKey) {
  * @param {() => number} [options.now]
  * @returns {{ generate: (args: object) => Promise<object> }}
  */
+export const HTTP_RESPONSE_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    status: { type: "INTEGER" },
+    contentType: { type: "STRING" },
+    body: { type: "STRING" },
+  },
+  required: ["status", "contentType", "body"],
+  propertyOrdering: ["status", "contentType", "body"],
+};
+
 export function createGeminiClient({ apiKey, fetchImpl, timeoutMs, temperature, thinkingBudget, maxOutputTokens, logger, now }) {
   const fetchFn = typeof fetchImpl === "function" ? fetchImpl : fetch;
   const clock = typeof now === "function" ? now : Date.now;
@@ -72,7 +83,7 @@ export function createGeminiClient({ apiKey, fetchImpl, timeoutMs, temperature, 
     };
   }
 
-  async function generate({ model, system, user }) {
+  async function generate({ model, system, user, schema }) {
     const startMs = Date.now();
     try {
       const cooldownUntil = cooldowns.get(model);
@@ -84,7 +95,7 @@ export function createGeminiClient({ apiKey, fetchImpl, timeoutMs, temperature, 
         temperature,
         maxOutputTokens: tokenCap,
         responseMimeType: "application/json",
-        responseSchema: RESPONSE_SCHEMA,
+        responseSchema: schema || RESPONSE_SCHEMA,
       };
       if (typeof model === "string" && model.startsWith("gemini-2.5")) {
         generationConfig.thinkingConfig = { thinkingBudget };
