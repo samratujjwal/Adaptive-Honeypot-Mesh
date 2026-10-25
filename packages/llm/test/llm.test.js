@@ -319,7 +319,7 @@ test("gemini: request asks for JSON with a system instruction", async () => {
   assert.equal(recordedBody.contents[0].role, "user");
   assert.equal(recordedBody.contents[0].parts[0].text, "USER-MSG");
   assert.equal(recordedBody.generationConfig.responseMimeType, "application/json");
-  assert.equal(recordedBody.generationConfig.maxOutputTokens, 1024);
+  assert.equal(recordedBody.generationConfig.maxOutputTokens, 2048);
   assert.equal(recordedBody.generationConfig.thinkingConfig.thinkingBudget, 0);
   assert.equal(recordedBody.safetySettings.length, 4);
   assert.ok(recordedBody.safetySettings.every((entry) => entry.threshold === "BLOCK_ONLY_HIGH"));
@@ -514,4 +514,78 @@ test("static: unknown command returns command not found", () => {
   const result = staticRespond("nmap");
   assert.equal(result.output, "bash: nmap: command not found\n");
   assert.equal(result.exitCode, 127);
+});
+
+test("gemini: request includes responseSchema", async () => {
+  let recordedBody = null;
+  const fetchImpl = async (url, init) => {
+    recordedBody = JSON.parse(init.body);
+    return geminiResponse(JSON.stringify({ output: "hi", exitCode: 0 }));
+  };
+  const client = createGeminiClient({ apiKey: FAKE_KEY, fetchImpl, timeoutMs: 5000, temperature: 0.4, thinkingBudget: 0, maxOutputTokens: 2048, logger: silentLogger, now: () => 1000000 });
+  await client.generate({ model: "gemini-2.5-flash-lite", system: "s", user: "u" });
+  assert.equal(recordedBody.generationConfig.responseMimeType, "application/json");
+  assert.deepEqual(recordedBody.generationConfig.responseSchema, {
+    type: "OBJECT",
+    properties: { output: { type: "STRING" }, exitCode: { type: "INTEGER" } },
+    required: ["output", "exitCode"],
+    propertyOrdering: ["output", "exitCode"],
+  });
+  assert.equal(recordedBody.generationConfig.maxOutputTokens, 2048);
+});
+
+test("gemini: MAX_TOKENS finish reason is reported as truncated", async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    json: async () => ({
+      candidates: [{ content: { parts: [{ text: '{"output":"partial' }] }, finishReason: "MAX_TOKENS" }],
+      usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 2048 },
+    }),
+  });
+  const client = createGeminiClient({ apiKey: FAKE_KEY, fetchImpl, timeoutMs: 5000, temperature: 0.4, thinkingBudget: 0, logger: silentLogger, now: () => 1000000 });
+  const result = await client.generate({ model: "gemini-2.5-flash-lite", system: "s", user: "u" });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "truncated");
+  assert.equal(result.attempt.errorKind, "truncated");
+  assert.equal(result.attempt.finishReason, "MAX_TOKENS");
+  assert.equal(result.attempt.promptTokens, 120);
+  assert.equal(result.attempt.outputTokens, 2048);
+  assert.ok(result.attempt.rawPreview.includes('{"output":"partial'));
+});
+
+test("service: attempts diagnostics list model, status and latency", async () => {
+  const fetchImpl = async (url) => {
+    if (url.includes("gemini-2.5-flash-lite")) return errorResponse(500);
+    return geminiResponse(JSON.stringify({ output: "fallback-ok", exitCode: 0 }));
+  };
+  const { service } = makeService(fetchImpl);
+  const result = await service.respond({ command: "ls", ctx: ctx() });
+  assert.equal(result.meta.source, "llm");
+  assert.ok(Array.isArray(result.meta.attempts));
+  assert.equal(result.meta.attempts.length, 2);
+  assert.equal(result.meta.attempts[0].model, "gemini-2.5-flash-lite");
+  assert.equal(result.meta.attempts[0].status, 500);
+  assert.equal(typeof result.meta.attempts[0].latencyMs, "number");
+  assert.ok(result.meta.attempts[0].latencyMs >= 0);
+  assert.equal(result.meta.attempts[1].model, "gemini-2.5-flash");
+  assert.equal(result.meta.attempts[1].status, 200);
+  assert.equal(typeof result.meta.attempts[1].latencyMs, "number");
+  assert.ok(result.meta.reason.includes("gemini-2.5-flash-lite:server_error"));
+  assert.ok(result.meta.reason.includes("gemini-2.5-flash:ok"));
+});
+
+test("service: diagnostics never contain the api key", async () => {
+  const secretKey = "SECRET-FAKE-KEY-98765";
+  const fetchImpl = async (url, init) => {
+    assert.equal(init.headers["x-goog-api-key"], secretKey);
+    return geminiResponse(JSON.stringify({ output: "hello", exitCode: 0 }));
+  };
+  const config = makeServiceConfig({ GEMINI_API_KEY: secretKey });
+  const service = createLlmService({ config, logger: silentLogger, fetchImpl });
+  const result = await service.respond({ command: "ls", ctx: ctx() });
+  assert.ok(!JSON.stringify(result.meta.attempts).includes(secretKey));
+  assert.ok(!String(result.meta.reason).includes(secretKey));
+  assert.ok(!result.output.includes(secretKey));
 });

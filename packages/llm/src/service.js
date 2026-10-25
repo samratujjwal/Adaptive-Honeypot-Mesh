@@ -15,6 +15,24 @@ function stripKey(text, apiKey) {
   return text.split(apiKey).join("[REDACTED]");
 }
 
+function cleanAttempt(attempt, apiKey) {
+  if (!attempt || typeof attempt !== "object") return null;
+  return {
+    model: attempt.model,
+    status: attempt.status === undefined ? null : attempt.status,
+    finishReason: attempt.finishReason === undefined ? null : attempt.finishReason,
+    promptTokens: attempt.promptTokens === undefined ? null : attempt.promptTokens,
+    outputTokens: attempt.outputTokens === undefined ? null : attempt.outputTokens,
+    latencyMs: typeof attempt.latencyMs === "number" && attempt.latencyMs >= 0 ? Math.floor(attempt.latencyMs) : 0,
+    errorKind: attempt.errorKind === undefined ? null : attempt.errorKind,
+    rawPreview: stripKey(attempt.rawPreview || "", apiKey),
+  };
+}
+
+function reasonFromAttempts(attempts) {
+  return attempts.map((attempt) => `${attempt.model}:${attempt.errorKind || "ok"}`).join(";");
+}
+
 /**
  * Convert service meta into the object for an event "llm" field.
  * The result passes validateEvent when embedded in an event.
@@ -46,6 +64,7 @@ export function toEventLlm(meta) {
  */
 export function createLlmService({ config, logger, fetchImpl, now }) {
   const log = logger || noOpLogger();
+  const apiKey = config.GEMINI_API_KEY || "";
   const cache = createCache({ max: config.LLM_CACHE_MAX, ttlMs: config.LLM_CACHE_TTL_MS, now });
   const limiter = createLimiter({
     rpm: config.LLM_RPM,
@@ -56,11 +75,12 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
     logger: log,
   });
   const client = createGeminiClient({
-    apiKey: config.GEMINI_API_KEY || "",
+    apiKey,
     fetchImpl,
     timeoutMs: config.LLM_TIMEOUT_MS,
     temperature: config.LLM_TEMPERATURE,
     thinkingBudget: config.GEMINI_THINKING_BUDGET,
+    maxOutputTokens: config.LLM_MAX_OUTPUT_TOKENS,
     logger: log,
     now,
   });
@@ -74,9 +94,21 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
     const sessionId = safeCtx.sessionId || "unknown";
     const persona = makePersona(hostname);
     const trimmedCommand = String(command || "").trim();
+    let attempts = [];
     function finish(output, exitCode, meta) {
       const latencyMs = Math.max(0, Date.now() - startMs);
-      return { output, exitCode, meta: { ...meta, latencyMs } };
+      const cappedAttempts = attempts.slice(0, 3);
+      return { output, exitCode, meta: { ...meta, latencyMs, attempts: cappedAttempts } };
+    }
+    function staticFinish(reason) {
+      const staticResult = staticRespond(trimmedCommand, { user, cwd, hostname });
+      return finish(staticResult.output, staticResult.exitCode, {
+        source: "static",
+        model: "static",
+        cached: false,
+        fallback: false,
+        reason,
+      });
     }
     try {
       if (config.LLM_MODE === "mock") {
@@ -87,6 +119,7 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
           cached: false,
           fallback: false,
           reason: null,
+          attempts: [],
         });
       }
       const timeDependent = isTimeDependent(trimmedCommand);
@@ -100,6 +133,7 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
             cached: true,
             fallback: Boolean(cached.fallback),
             reason: null,
+            attempts: [],
           });
         }
       }
@@ -107,16 +141,11 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
       const userMessage = buildUserMessage(trimmedCommand);
       const primaryAcquire = limiter.tryAcquire(sessionId);
       if (!primaryAcquire.ok) {
-        const staticResult = staticRespond(trimmedCommand, { user, cwd, hostname });
-        return finish(staticResult.output, staticResult.exitCode, {
-          source: "static",
-          model: "static",
-          cached: false,
-          fallback: false,
-          reason: `rate:${primaryAcquire.reason}`,
-        });
+        return staticFinish(`rate:${primaryAcquire.reason}`);
       }
       const primary = await client.generate({ model: config.GEMINI_MODEL, system, user: userMessage });
+      const primaryAttempt = cleanAttempt(primary.attempt, apiKey);
+      if (primaryAttempt) attempts.push(primaryAttempt);
       if (primary.ok) {
         const parsed = parseModelOutput(primary.text, { maxChars: config.LLM_MAX_OUTPUT_CHARS });
         if (parsed.ok) {
@@ -128,65 +157,22 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
             model: config.GEMINI_MODEL,
             cached: false,
             fallback: false,
-            reason: null,
+            reason: reasonFromAttempts(attempts),
           });
         }
-        const fallbackAcquire = limiter.tryAcquire(sessionId);
-        if (!fallbackAcquire.ok) {
-          const staticResult = staticRespond(trimmedCommand, { user, cwd, hostname });
-          return finish(staticResult.output, staticResult.exitCode, {
-            source: "static",
-            model: "static",
-            cached: false,
-            fallback: false,
-            reason: `rate:${fallbackAcquire.reason}`,
-          });
-        }
-        const fallbackResult = await client.generate({ model: config.GEMINI_FALLBACK_MODEL, system, user: userMessage });
-        if (fallbackResult.ok) {
-          const fallbackParsed = parseModelOutput(fallbackResult.text, { maxChars: config.LLM_MAX_OUTPUT_CHARS });
-          if (fallbackParsed.ok) {
-            if (!timeDependent) {
-              cache.set(key, { output: fallbackParsed.output, exitCode: fallbackParsed.exitCode, model: config.GEMINI_FALLBACK_MODEL, fallback: true });
-            }
-            return finish(fallbackParsed.output, fallbackParsed.exitCode, {
-              source: "llm",
-              model: config.GEMINI_FALLBACK_MODEL,
-              cached: false,
-              fallback: true,
-              reason: null,
-            });
-          }
-          const staticResult = staticRespond(trimmedCommand, { user, cwd, hostname });
-          return finish(staticResult.output, staticResult.exitCode, {
-            source: "static",
-            model: "static",
-            cached: false,
-            fallback: false,
-            reason: `llm_failed:${parsed.reason}:${fallbackParsed.reason}`,
-          });
-        }
-        const staticResult = staticRespond(trimmedCommand, { user, cwd, hostname });
-        return finish(staticResult.output, staticResult.exitCode, {
-          source: "static",
-          model: "static",
-          cached: false,
-          fallback: false,
-          reason: `llm_failed:${parsed.reason}:${fallbackResult.reason || "error"}`,
-        });
+        if (attempts.length > 0) attempts[attempts.length - 1] = { ...attempts[attempts.length - 1], errorKind: parsed.reason };
+      } else if (primary.reason === "truncated" && config.GEMINI_FALLBACK_MODEL === config.GEMINI_MODEL) {
+        return staticFinish(reasonFromAttempts(attempts));
       }
       const fallbackAcquire = limiter.tryAcquire(sessionId);
       if (!fallbackAcquire.ok) {
-        const staticResult = staticRespond(trimmedCommand, { user, cwd, hostname });
-        return finish(staticResult.output, staticResult.exitCode, {
-          source: "static",
-          model: "static",
-          cached: false,
-          fallback: false,
-          reason: `rate:${fallbackAcquire.reason}`,
-        });
+        const baseReason = reasonFromAttempts(attempts);
+        const reason = baseReason ? `${baseReason};rate:${fallbackAcquire.reason}` : `rate:${fallbackAcquire.reason}`;
+        return staticFinish(reason);
       }
       const fallbackResult = await client.generate({ model: config.GEMINI_FALLBACK_MODEL, system, user: userMessage });
+      const fallbackAttempt = cleanAttempt(fallbackResult.attempt, apiKey);
+      if (fallbackAttempt) attempts.push(fallbackAttempt);
       if (fallbackResult.ok) {
         const fallbackParsed = parseModelOutput(fallbackResult.text, { maxChars: config.LLM_MAX_OUTPUT_CHARS });
         if (fallbackParsed.ok) {
@@ -198,46 +184,22 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
             model: config.GEMINI_FALLBACK_MODEL,
             cached: false,
             fallback: true,
-            reason: null,
+            reason: reasonFromAttempts(attempts),
           });
         }
-        const staticResult = staticRespond(trimmedCommand, { user, cwd, hostname });
-        return finish(staticResult.output, staticResult.exitCode, {
-          source: "static",
-          model: "static",
-          cached: false,
-          fallback: false,
-          reason: `llm_failed:${primary.reason || "error"}:${fallbackParsed.reason}`,
-        });
+        if (attempts.length > 0) attempts[attempts.length - 1] = { ...attempts[attempts.length - 1], errorKind: fallbackParsed.reason };
+        return staticFinish(reasonFromAttempts(attempts));
       }
+      return staticFinish(reasonFromAttempts(attempts));
+    } catch {
       const staticResult = staticRespond(trimmedCommand, { user, cwd, hostname });
       return finish(staticResult.output, staticResult.exitCode, {
         source: "static",
         model: "static",
         cached: false,
         fallback: false,
-        reason: `llm_failed:${primary.reason || "error"}:${fallbackResult.reason || "error"}`,
+        reason: attempts.length > 0 ? reasonFromAttempts(attempts) : "internal_error",
       });
-    } catch (error) {
-      try {
-        const safeReason = stripKey(error && error.message ? "internal_error" : "internal_error", config.GEMINI_API_KEY);
-        const staticResult = staticRespond(trimmedCommand, { user, cwd, hostname });
-        return finish(staticResult.output, staticResult.exitCode, {
-          source: "static",
-          model: "static",
-          cached: false,
-          fallback: false,
-          reason: safeReason,
-        });
-      } catch {
-        return finish("", 127, {
-          source: "static",
-          model: "static",
-          cached: false,
-          fallback: false,
-          reason: "internal_error",
-        });
-      }
     }
   }
 

@@ -99,3 +99,12 @@ test("config: invalid LLM limits are rejected", () => {
   assert.throws(() => loadConfig({ LLM_TEMPERATURE: 2 }), /LLM_TEMPERATURE/);
   assert.throws(() => loadConfig({ GEMINI_THINKING_BUDGET: -1 }), /GEMINI_THINKING_BUDGET/);
 });
+
+test("config: LLM_MAX_OUTPUT_TOKENS defaults and validates", () => {
+  const cfg = loadConfig({});
+  assert.equal(cfg.LLM_MAX_OUTPUT_TOKENS, 2048);
+  assert.equal(loadConfig({ LLM_MAX_OUTPUT_TOKENS: 512 }).LLM_MAX_OUTPUT_TOKENS, 512);
+  assert.throws(() => loadConfig({ LLM_MAX_OUTPUT_TOKENS: 0 }), /LLM_MAX_OUTPUT_TOKENS/);
+  assert.throws(() => loadConfig({ LLM_MAX_OUTPUT_TOKENS: -1 }), /LLM_MAX_OUTPUT_TOKENS/);
+  assert.throws(() => loadConfig({ LLM_MAX_OUTPUT_TOKENS: 1.5 }), /LLM_MAX_OUTPUT_TOKENS/);
+});

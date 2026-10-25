@@ -39,6 +39,7 @@ const configSchema = z
     LLM_CACHE_MAX: z.coerce.number().int().min(1).default(500),
     LLM_CACHE_TTL_MS: z.coerce.number().int().min(1).default(3600000),
     LLM_MAX_OUTPUT_CHARS: z.coerce.number().int().min(1).default(4000),
+    LLM_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(1).default(2048),
     LLM_TEMPERATURE: z.coerce.number().min(0).max(1).default(0.4),
     GEMINI_THINKING_BUDGET: z.coerce.number().int().min(0).default(0),
     LLM_USAGE_FILE: z.string().min(1).default("data/llm-usage.json"),
