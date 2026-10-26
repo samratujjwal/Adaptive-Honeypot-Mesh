@@ -1,35 +1,64 @@
+import { fileURLToPath } from "node:url";
 import { config } from "../../../packages/shared/src/config.js";
 import { createFileSink } from "../../../packages/shared/src/event-sink.js";
 import { logger } from "../../../packages/shared/src/logger.js";
 import { createLlmService } from "../../../packages/llm/src/service.js";
 import { createSshHoneypot } from "./server.js";
 
-async function main() {
-  const sink = createFileSink({ dir: config.EVENT_DIR, service: "ssh" });
-  const llmService = createLlmService({ config, logger });
-  const honeypot = createSshHoneypot({ config, sink, llmService });
-  try {
-    await honeypot.listen(config.SSH_PORT, config.BIND_HOST);
-  } catch (error) {
-    console.error(`SSH honeypot failed to start: ${error.message}`);
-    process.exit(1);
-  }
+/**
+ * Start the SSH honeypot. Runs itself only when executed directly.
+ *
+ * @param {object} [deps]
+ * @param {object} [deps.config]
+ * @param {{ emit: (event: unknown) => boolean, close: () => void }} [deps.sink]
+ * @param {object} [deps.logger]
+ * @param {object} [deps.llmService]
+ * @returns {Promise<{ ssh: object, close: () => Promise<void> }>}
+ */
+export async function start(deps) {
+  const cfg = (deps && deps.config) || config;
+  const sink = (deps && deps.sink) || createFileSink({ dir: cfg.EVENT_DIR, service: "ssh" });
+  const log = (deps && deps.logger) || logger;
+  const llmService = (deps && deps.llmService) || createLlmService({ config: cfg, logger: log });
+  const honeypot = createSshHoneypot({ config: cfg, sink, llmService });
+  await honeypot.listen(cfg.SSH_PORT, cfg.BIND_HOST);
   const address = honeypot.address();
-  logger.info({ address: address.address, port: address.port }, "SSH honeypot listening");
-  console.log(`SSH honeypot listening on ${address.address}:${address.port}`);
+  try {
+    log.info({ address: address.address, port: address.port }, "SSH honeypot listening");
+  } catch {
+    /* Ignore. */
+  }
+  async function close() {
+    await honeypot.close();
+    try {
+      sink.close();
+    } catch {
+      /* Ignore. */
+    }
+  }
+  return { ssh: honeypot, close };
+}
+
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isMain) {
+  let instance = null;
   let shuttingDown = false;
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    await honeypot.close();
-    sink.close();
+    if (instance) await instance.close();
     process.exit(0);
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+  start()
+    .then((result) => {
+      instance = result;
+      const address = result.ssh.address();
+      console.log(`SSH honeypot listening on ${address.address}:${address.port}`);
+    })
+    .catch((error) => {
+      console.error(`SSH honeypot failed to start: ${error.message}`);
+      process.exit(1);
+    });
 }
-
-main().catch((error) => {
-  console.error(`SSH honeypot failed to start: ${error.message}`);
-  process.exit(1);
-});

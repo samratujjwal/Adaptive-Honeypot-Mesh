@@ -1,4 +1,5 @@
 User-agent: *
-Disallow: /admin
-Disallow: /backup
-Disallow: /wp-admin
+Disallow: /wp-admin/
+Disallow: /backup/
+Sitemap: https://{{DOMAIN}}/sitemap.xml
+Disallow: /admin/

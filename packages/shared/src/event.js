@@ -22,6 +22,7 @@ export const eventSchema = z.object({
     "http_request",
     "ftp_command",
     "file_transfer",
+    "honeytoken",
     "llm_response",
     "connection_close",
   ]),
@@ -45,6 +46,14 @@ export const eventSchema = z.object({
     )
     .optional(),
 }).superRefine((value, ctx) => {
+  if (value.eventType === "honeytoken") {
+    const payload = value.payload || {};
+    if (!payload.tokenId || typeof payload.tokenId !== "string") ctx.addIssue({ code: "custom", path: ["payload", "tokenId"], message: "tokenId is required" });
+    if (!payload.kind || typeof payload.kind !== "string") ctx.addIssue({ code: "custom", path: ["payload", "kind"], message: "kind is required" });
+    if (payload.action !== "viewed" && payload.action !== "used") ctx.addIssue({ code: "custom", path: ["payload", "action"], message: "action must be viewed or used" });
+    const vias = ["ssh_read", "ssh_command", "ssh_auth", "ftp_read", "ftp_command", "ftp_auth", "http_read", "http_request", "http_login"];
+    if (!vias.includes(payload.via)) ctx.addIssue({ code: "custom", path: ["payload", "via"], message: "via is invalid" });
+  }
   if (value.payload !== undefined) {
     const serialized = JSON.stringify(value.payload);
     if (serialized !== undefined && Buffer.byteLength(serialized, "utf8") > MAX_PAYLOAD_BYTES) {

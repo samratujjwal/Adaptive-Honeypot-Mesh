@@ -1,4 +1,4 @@
-import { getWebFacts } from "./web-facts.js";
+import { createPersona } from "../../../packages/persona/src/persona.js";
 import { extnameOf, extToContentType } from "./pages.js";
 
 const STATIC_DIRS = ["/wp-includes", "/wp-admin", "/wp-content", "/phpmyadmin", "/static", "/assets"];
@@ -41,7 +41,7 @@ function parseForm(bodyText) {
 }
 
 function nginxPage(serverHeader, status, title) {
-  return `<html>\n<head><title>${status} ${title}</title></head>\n<body>\n<center><h1>${status} ${title}</h1></center>\n<hr><center>${serverHeader}</center>\n</body>\n</html>\n`;
+  return `<html>\r\n<head><title>${status} ${title}</title></head>\r\n<body>\r\n<center><h1>${status} ${title}</h1></center>\r\n<hr><center>${serverHeader}</center>\r\n</body>\r\n</html>\r\n`;
 }
 
 function isInterestingPath(path, authenticated, method) {
@@ -64,8 +64,8 @@ function isStaticAsset(path) {
 
 function staticAssetBody(path) {
   const ext = extnameOf(path.toLowerCase());
-  if (ext === ".css") return "/* ExampleCorp */\nbody { margin: 0; }\n";
-  if (ext === ".js") return "// ExampleCorp\nconsole.log('example');\n";
+  if (ext === ".css") return "/* site styles */\nbody { margin: 0; }\n";
+  if (ext === ".js") return "// site script\nconsole.log('loaded');\n";
   if (ext === ".png") return Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   if (ext === ".ico") return Buffer.from([0, 0, 1, 0, 1, 0]);
   if (ext === ".svg") return '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>';
@@ -88,8 +88,11 @@ function staticAssetBody(path) {
  * @param {string} options.serverHeader
  * @returns {object} route result
  */
-export function routeRequest({ method, path, query, headers, bodyText, pages, credentials, tokenStore, sourceIp, serverHeader }) {
-  const facts = getWebFacts();
+export function routeRequest({ method, path, query, headers, bodyText, pages, credentials, tokenStore, sourceIp, serverHeader, persona, honeytokens }) {
+  const facts = persona || createPersona({ seed: "change-me-default-seed" });
+  const companyName = facts.company.name;
+  const theme = facts.web.theme;
+  const wpVersion = facts.versions.wordpress;
   const cookies = parseCookies(headers && (headers.cookie || headers.Cookie));
   const wpCookieName = `wordpress_logged_in_${WP_HASH}`;
   const wpUser = tokenStore ? tokenStore.validate(cookies[wpCookieName], sourceIp, "wp") : null;
@@ -103,8 +106,15 @@ export function routeRequest({ method, path, query, headers, bodyText, pages, cr
     return data ? data.toString("utf8") : "";
   }
 
+  function staticHeaders(bodyText) {
+    const lastModified = new Date(facts.host.bootTime).toUTCString();
+    const mtimeHex = Math.floor(Date.parse(facts.host.bootTime) / 1000).toString(16);
+    const sizeHex = Buffer.byteLength(String(bodyText || ""), "utf8").toString(16);
+    const etag = `\"${mtimeHex}-${sizeHex}\"`;
+    return { "Last-Modified": lastModified, ETag: etag };
+  }
   function notFound() {
-    return { status: 404, contentType: htmlType, body: nginxPage(header, 404, "Not Found"), headers: {}, matchedRoute: "not_found", authenticated, llmEligible: false, credentials: null };
+    return { status: 404, contentType: "text/html", body: nginxPage(header, 404, "Not Found"), headers: {}, matchedRoute: "not_found", authenticated, llmEligible: false, credentials: null };
   }
 
   if (method === "HEAD" || method === "GET" || method === "POST" || method === "OPTIONS" || method === "PUT" || method === "DELETE" || method === "PATCH" || method === "TRACE" || method === "CONNECT") {
@@ -116,7 +126,7 @@ export function routeRequest({ method, path, query, headers, bodyText, pages, cr
   }
 
   if (method !== "GET" && method !== "HEAD" && method !== "POST") {
-    return { status: 405, contentType: htmlType, body: nginxPage(header, 405, "Not Allowed"), headers: { Allow: "GET, HEAD, POST, OPTIONS" }, matchedRoute: "method_not_allowed", authenticated, llmEligible: false, credentials: null };
+    return { status: 405, contentType: "text/html", body: nginxPage(header, 405, "Not Allowed"), headers: { Allow: "GET, HEAD, POST, OPTIONS" }, matchedRoute: "method_not_allowed", authenticated, llmEligible: false, credentials: null };
   }
 
   const isHead = method === "HEAD";
@@ -125,12 +135,14 @@ export function routeRequest({ method, path, query, headers, bodyText, pages, cr
   }
 
   if (path === "/") {
-    return withHead({ status: 200, contentType: htmlType, body: page("index.html") || `<html><body><h1>${facts.companyName}</h1></body></html>`, headers: {}, matchedRoute: "home", authenticated, llmEligible: false, credentials: null });
+    const homeBody = (page("index.html") || `<html><body><h1>${companyName}</h1></body></html>`).replace(/ExampleCorp/g, companyName);
+    return withHead({ status: 200, contentType: htmlType, body: homeBody, headers: staticHeaders(homeBody), matchedRoute: "home", authenticated, llmEligible: false, credentials: null });
   }
 
   if (path === "/wp-login.php") {
     if (method === "GET" || isHead) {
-      return withHead({ status: 200, contentType: htmlType, body: page("wp-login.html"), headers: {}, matchedRoute: "wp_login", authenticated, llmEligible: false, credentials: null });
+      const loginBody = (page("wp-login.html") || "").replace(/ExampleCorp/g, companyName);
+      return withHead({ status: 200, contentType: htmlType, body: loginBody, headers: staticHeaders(loginBody), matchedRoute: "wp_login", authenticated, llmEligible: false, credentials: null });
     }
     const form = parseForm(bodyText);
     const username = form.log || form.username || "";
@@ -205,7 +217,13 @@ export function routeRequest({ method, path, query, headers, bodyText, pages, cr
   }
 
   if (path === "/.env") {
-    return withHead({ status: 200, contentType: "text/plain", body: page("env.txt"), headers: {}, matchedRoute: "sensitive_env", authenticated, llmEligible: false, credentials: null });
+    const envBody = page("env.txt");
+    return withHead({ status: 200, contentType: "text/plain", body: envBody, headers: staticHeaders(envBody), matchedRoute: "sensitive_env", authenticated, llmEligible: false, credentials: null });
+  }
+
+  if (path === "/wp-config.php.bak") {
+    const bakBody = page("wp-config.bak") || page("env.txt");
+    return withHead({ status: 200, contentType: "text/plain", body: bakBody, headers: staticHeaders(bakBody), matchedRoute: "wp_config_bak", authenticated, llmEligible: false, credentials: null });
   }
 
   if (path === "/.git/config") {
@@ -225,7 +243,7 @@ export function routeRequest({ method, path, query, headers, bodyText, pages, cr
   }
 
   if (path === "/server-status") {
-    return withHead({ status: 403, contentType: htmlType, body: nginxPage(header, 403, "Forbidden"), headers: {}, matchedRoute: "server_status", authenticated, llmEligible: false, credentials: null });
+    return withHead({ status: 403, contentType: "text/html", body: nginxPage(header, 403, "Forbidden"), headers: {}, matchedRoute: "server_status", authenticated, llmEligible: false, credentials: null });
   }
 
   if (path === "/favicon.ico") {
@@ -236,7 +254,7 @@ export function routeRequest({ method, path, query, headers, bodyText, pages, cr
 
   if (isStaticAsset(path)) {
     const body = staticAssetBody(path);
-    return withHead({ status: 200, contentType: extToContentType(extnameOf(path)), body, headers: {}, matchedRoute: "static_asset", authenticated, llmEligible: false, credentials: null });
+    return withHead({ status: 200, contentType: extToContentType(extnameOf(path)), body, headers: staticHeaders(body), matchedRoute: "static_asset", authenticated, llmEligible: false, credentials: null });
   }
 
   if (isInterestingPath(path, authenticated, method)) {

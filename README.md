@@ -47,3 +47,18 @@ this only validates the file:
 ```sh
 npm run lint:compose
 ```
+
+## Running
+
+Start a single service, or all three together in one process:
+
+```sh
+npm run start:ssh
+npm run start:http
+npm run start:ftp
+npm run start:all
+```
+
+Ports (defaults, configurable via .env): SSH 2222, HTTP 8080, FTP 2121.
+Events are written to the EVENT_DIR directory as ssh.jsonl, http.jsonl
+and ftp.jsonl. Everything binds to loopback only (127.0.0.1 by default).

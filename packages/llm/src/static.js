@@ -1,4 +1,9 @@
-import { getPersonaFacts } from "./persona-facts.js";
+import { createPersona, personaToFacts } from "../../persona/src/persona.js";
+
+function getFacts(ctx) {
+  if (ctx && ctx.persona) return personaToFacts(ctx.persona);
+  return personaToFacts(createPersona({ seed: "change-me-default-seed", hostname: (ctx && ctx.hostname) || "srv-web-01" }));
+}
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -116,7 +121,8 @@ function netstatAnt(facts, ctx) {
   for (const entry of facts.listening) {
     out += `tcp        0      0 ${entry.address}:${entry.port}`.padEnd(34) + ` 0.0.0.0:*               LISTEN\n`;
   }
-  out += `tcp        0      0 10.0.0.15:22            ${sourceIp}:54321           ESTABLISHED\n`;
+  const hostIp = (facts.interfaces[1] && facts.interfaces[1].ip) || "10.0.0.15";
+  out += `tcp        0      0 ${hostIp}:22            ${sourceIp}:54321           ESTABLISHED\n`;
   return out;
 }
 
@@ -224,7 +230,7 @@ export function isStaticTableCommand(normalized) {
 }
 
 /**
- * Return a fictional, persona-consistent output built from the
+ * Return a persona-consistent output built from the
  * single fact file. Never executes anything; pure data.
  *
  * @param {string} command
@@ -234,7 +240,7 @@ export function isStaticTableCommand(normalized) {
 export function staticTableRespond(command, ctx) {
   const normalized = String(command || "").trim().replace(/\s+/g, " ");
   if (!isStaticTableCommand(normalized)) return null;
-  const facts = getPersonaFacts();
+  const facts = getFacts(ctx);
   const ms = nowMs(ctx);
   if (normalized === "ps") return { output: psPlain(facts, ctx, normalized), exitCode: 0 };
   if (normalized === "ps aux") return { output: psAux(facts, ctx, normalized), exitCode: 0 };

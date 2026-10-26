@@ -23,6 +23,22 @@ const configSchema = z
     HTTP_LLM_DEADLINE_MS: z.coerce.number().int().min(1).default(5000),
     HTTP_SESSION_WINDOW_MS: z.coerce.number().int().min(1).default(1800000),
     FTP_PORT: z.coerce.number().int().min(1).max(65535).default(2121),
+    FTP_BANNER: z.string().min(1).default("(vsFTPd 3.0.5)"),
+    FTP_MAX_CONNECTIONS: z.coerce.number().int().min(1).default(50),
+    FTP_MAX_CONNECTIONS_PER_IP: z.coerce.number().int().min(1).default(5),
+    FTP_MAX_AUTH_ATTEMPTS: z.coerce.number().int().min(1).default(5),
+    FTP_AUTH_FAIL_DELAY_MS: z.coerce.number().int().min(0).default(1000),
+    FTP_IDLE_TIMEOUT_MS: z.coerce.number().int().min(1).default(60000),
+    FTP_MAX_SESSION_MS: z.coerce.number().int().min(1).default(600000),
+    FTP_MAX_LINE: z.coerce.number().int().min(1).default(512),
+    FTP_MAX_CMDS_PER_MIN: z.coerce.number().int().min(1).default(120),
+    FTP_PASV_MIN_PORT: z.coerce.number().int().min(1).max(65535).default(40000),
+    FTP_PASV_MAX_PORT: z.coerce.number().int().min(1).max(65535).default(40100),
+    FTP_PASV_ADDRESS: z.string().ipv4().default("127.0.0.1"),
+    FTP_DATA_TIMEOUT_MS: z.coerce.number().int().min(1).default(10000),
+    FTP_MAX_UPLOAD_BYTES: z.coerce.number().int().min(1).default(1048576),
+    FTP_MAX_SESSION_BYTES: z.coerce.number().int().min(1).default(2097152),
+    FTP_MAX_NODES: z.coerce.number().int().min(1).default(500),
     BIND_HOST: z.union([z.string().ipv4(), z.string().ipv6()]).default("127.0.0.1"),
     SSH_IDLE_TIMEOUT_MS: z.coerce.number().int().min(0).default(120000),
     SSH_MAX_SESSION_MS: z.coerce.number().int().min(0).default(600000),
@@ -36,6 +52,9 @@ const configSchema = z
     HONEYPOT_STATIC_FIRST: z.union([z.boolean(), z.enum(["true", "false"])]).transform((value) => value === true || value === "true").default(true),
     SSH_IDENT: z.string().min(1).default("OpenSSH_8.9p1 Ubuntu-3ubuntu0.6"),
     HONEYPOT_HOSTNAME: z.string().min(1).default("srv-web-01"),
+    PERSONA_SEED: z.string().min(8).max(64).default("change-me-default-seed"),
+    HONEYPOT_DOMAIN: z.string().min(1).optional(),
+    HONEYTOKENS_ENABLED: z.union([z.boolean(), z.enum(["true", "false"])]).transform((value) => value === true || value === "true").default(true),
     ALLOW_PUBLIC_BIND: z
       .union([z.boolean(), z.enum(["true", "false"])])
       .transform((value) => value === true || value === "true")
@@ -71,6 +90,9 @@ const configSchema = z
     }
     if (value.SSH_LLM_DEADLINE_MS >= value.SSH_IDLE_TIMEOUT_MS) {
       ctx.addIssue({ code: "custom", path: ["SSH_LLM_DEADLINE_MS"], message: "SSH_LLM_DEADLINE_MS must be less than SSH_IDLE_TIMEOUT_MS" });
+    }
+    if (value.FTP_PASV_MIN_PORT > value.FTP_PASV_MAX_PORT) {
+      ctx.addIssue({ code: "custom", path: ["FTP_PASV_MIN_PORT"], message: "FTP_PASV_MIN_PORT must be less than or equal to FTP_PASV_MAX_PORT" });
     }
     if ((value.BIND_HOST === "0.0.0.0" || value.BIND_HOST === "::") && !value.ALLOW_PUBLIC_BIND) {
       ctx.addIssue({

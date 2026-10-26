@@ -161,7 +161,7 @@ test("http: GET / returns the fake site page", async () => {
   try {
     const res = await httpRequest(made.port, { path: "/" });
     assert.equal(res.status, 200);
-    assert.ok(res.body.includes("ExampleCorp"));
+    assert.ok(res.body.includes("Silverline Services"));
   } finally {
     await made.honeypot.close();
     rmSync(made.dir, { recursive: true, force: true });
@@ -331,7 +331,7 @@ test("app: .git/config is served as a fictional file", async () => {
   try {
     const res = await httpRequest(made.port, { path: "/.git/config" });
     assert.equal(res.status, 200);
-    assert.ok(res.body.includes("git.example.com"));
+    assert.ok(res.body.includes("git.") && res.body.includes("/project.git"));
     const other = await httpRequest(made.port, { path: "/.git/objects/abc" });
     assert.equal(other.status, 404);
   } finally {
@@ -715,7 +715,6 @@ test("http: router and handlers import no " + "child" + "_process, network or fs
     join(here, "..", "src", "router.js"),
     join(here, "..", "src", "sessions.js"),
     join(here, "..", "src", "events.js"),
-    join(here, "..", "src", "web-facts.js"),
   ];
   const banned = ["node:fs", "node:net", "node:http", "node:https", "node:dns", "node:dgram", "node:tls", "node:" + "child" + "_process"];
   const uniqueBanned = [...new Set(banned)];

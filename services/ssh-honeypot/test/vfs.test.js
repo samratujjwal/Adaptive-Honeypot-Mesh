@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createVfs } from "../src/vfs.js";
+import { createVfs } from "../../../packages/vfs/src/vfs.js";
 import { buildSeed } from "../src/seed/ubuntu-2204.js";
 
 function makeVfs() {

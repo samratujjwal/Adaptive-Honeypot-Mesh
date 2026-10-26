@@ -7,9 +7,11 @@ import { logger } from "../../../packages/shared/src/logger.js";
 import { checkPassword, loadCredentials, publicKeyFingerprint } from "./auth.js";
 import { loadOrCreateHostKey } from "./hostkey.js";
 import { createShellSession, MAX_INPUT_LINE } from "./shell.js";
-import { createVfs } from "./vfs.js";
+import { createVfs } from "../../../packages/vfs/src/vfs.js";
 import { buildSeed, uidForUser } from "./seed/ubuntu-2204.js";
 import { createCommandEngine } from "./commands.js";
+import { createPersona } from "../../../packages/persona/src/persona.js";
+import { createHoneytokens } from "../../../packages/persona/src/honeytokens.js";
 import { toEventLlm } from "../../../packages/llm/src/service.js";
 
 const { Server } = ssh2;
@@ -43,6 +45,13 @@ export function createSshHoneypot(options) {
   const { config, sink } = options;
   const log = options.logger || logger;
   const credentials = options.credentials || loadCredentials(options.credentialsPath || defaultCredentialsPath());
+  const persona = options.persona || createPersona({ seed: config.PERSONA_SEED || "change-me-default-seed", hostname: config.HONEYPOT_HOSTNAME, domain: config.HONEYPOT_DOMAIN });
+  const honeytokens = options.honeytokens || createHoneytokens(persona, { enabled: config.HONEYTOKENS_ENABLED !== false });
+  if (config.PERSONA_SEED === "change-me-default-seed") {
+    try { log.warn("PERSONA_SEED is the default value; set your own random seed in .env"); } catch {}
+  }
+  const tokenCredentials = honeytokens.tokens.filter((token) => token.account).map((token) => ({ username: token.account, password: token.value }));
+  const allCredentials = [...credentials, ...tokenCredentials];
   const hostKeyPath = options.hostKeyPath || config.SSH_HOST_KEY_PATH;
   const hostKey = loadOrCreateHostKey(hostKeyPath);
   const ident = config.SSH_IDENT;
@@ -64,6 +73,22 @@ export function createSshHoneypot(options) {
     return event;
   }
 
+  function emitHoneytokenUsed(session, text, via) {
+    if (!honeytokens.tokens.length) return;
+    for (const token of honeytokens.lookup(text || "")) {
+      emitEvent(session, "honeytoken", { tokenId: token.id, kind: token.kind, action: "used", via });
+    }
+  }
+  function emitHoneytokenViewed(session, output, via) {
+    if (!honeytokens.tokens.length) return;
+    if (!session.viewedTokens) session.viewedTokens = new Set();
+    for (const token of honeytokens.lookup(output || "")) {
+      if (!session.viewedTokens.has(token.id)) {
+        session.viewedTokens.add(token.id);
+        emitEvent(session, "honeytoken", { tokenId: token.id, kind: token.kind, action: "viewed", via });
+      }
+    }
+  }
   function closeConnection(session, reason) {
     if (session.closeEmitted) return;
     session.closeEmitted = true;
@@ -150,8 +175,13 @@ export function createSshHoneypot(options) {
       if (method === "password") {
         const username = ctx.username;
         const password = ctx.password || "";
-        const success = checkPassword(username, password, credentials);
+        const success = checkPassword(username, password, allCredentials);
         emitEvent(session, "auth_attempt", { method, username, password, success });
+        if (honeytokens.tokens.length > 0) {
+          for (const token of honeytokens.lookup(password)) {
+            emitEvent(session, "honeytoken", { tokenId: token.id, kind: token.kind, action: "used", via: "ssh_auth", success });
+          }
+        }
         log.info({ method, username, success }, "auth attempt");
         if (success) {
           session.username = username;
@@ -183,12 +213,13 @@ export function createSshHoneypot(options) {
 
     function getEngine() {
       if (session.engine) return session.engine;
-      const vfs = createVfs(buildSeed(config.HONEYPOT_HOSTNAME));
+      const vfs = createVfs(buildSeed({ persona, honeytokens }), { uidForUser });
       vfs.ensureUserHome(session.username);
       session.engine = createCommandEngine({
         vfs,
         user: { name: session.username, uid: uidForUser(session.username) },
-        hostname: config.HONEYPOT_HOSTNAME,
+        hostname: persona.host.hostname,
+        persona,
         llm: options.llmService || options.llm || null,
         config,
         sessionId: session.sessionId,
@@ -274,6 +305,10 @@ export function createSshHoneypot(options) {
               handledBy: commandRecord.handledBy || "engine",
             };
             emitEvent(session, "command", commandPayload);
+            emitHoneytokenUsed(session, commandRecord.command, "ssh_command");
+            if (/^(cat|head|tail|less)\s/.test(String(commandRecord.command || "").trim()) || String(commandRecord.command || "").trim().startsWith("cat")) {
+              emitHoneytokenViewed(session, commandRecord.output || "", "ssh_read");
+            }
             if (commandRecord.llmMeta) {
               emitLlmAndTransfer(session, commandRecord.command, { output: commandRecord.output || "", exitCode: commandRecord.exitCode, handledBy: commandRecord.handledBy, meta: commandRecord.llmMeta, transfer: commandRecord.transfer });
             } else if (commandRecord.transfer) {
@@ -326,6 +361,8 @@ export function createSshHoneypot(options) {
             exitCode: result.exitCode,
             handledBy: result.handledBy || "engine",
           });
+          emitHoneytokenUsed(session, command, "ssh_command");
+          if (/^(cat|head|tail|less)\s/.test(String(command || "").trim())) emitHoneytokenViewed(session, result.output || "", "ssh_read");
           emitLlmAndTransfer(session, command, result);
           session.bytesOut += Buffer.byteLength(result.output, "utf8");
           if (result.output !== "") stream.write(result.output);

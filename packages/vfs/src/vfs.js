@@ -1,8 +1,8 @@
-import { uidForUser } from "./seed/ubuntu-2204.js";
-
 function deepCopyNode(node) {
   if (node.type === "file") {
-    return { type: "file", mode: node.mode, owner: node.owner, group: node.group, mtime: node.mtime, content: node.content };
+    const copied = { type: "file", mode: node.mode, owner: node.owner, group: node.group, mtime: node.mtime, content: Buffer.isBuffer(node.content) ? Buffer.from(node.content) : node.content };
+    if (node.size !== undefined) copied.size = node.size;
+    return copied;
   }
   const children = {};
   for (const [name, child] of Object.entries(node.children || {})) {
@@ -45,8 +45,9 @@ export function resolvePath(cwd, path, home) {
  * @param {object} seed
  * @returns {object} vfs object with resolve/get/list/readFile/canRead
  */
-export function createVfs(seed) {
+export function createVfs(seed, options = {}) {
   const root = deepCopyNode(seed);
+  const uidForUser = typeof options.uidForUser === "function" ? options.uidForUser : (username) => (username === "root" ? 0 : 1000);
 
   function get(absPath) {
     if (absPath === "/") return root;
@@ -171,6 +172,65 @@ export function createVfs(seed) {
     return home;
   }
 
+  function byteSize(node) {
+    if (!node || node.type !== "file") return 4096;
+    if (typeof node.size === "number") return node.size;
+    if (Buffer.isBuffer(node.content)) return node.content.length;
+    return Buffer.byteLength(String(node.content || ""), "utf8");
+  }
+
+  function stat(absPath) {
+    const node = get(absPath);
+    if (!node) return null;
+    return { type: node.type, mode: node.mode, owner: node.owner, group: node.group, mtime: node.mtime, size: byteSize(node) };
+  }
+
+  function mkdir(absPath, node) {
+    const dirNode = node || { type: "dir", mode: "0755", owner: "ftp", group: "ftp", mtime: new Date().toISOString(), children: {} };
+    return mkdirNode(absPath, dirNode);
+  }
+
+  function writeFile(absPath, content, meta) {
+    const { parent, name } = parentAndName(absPath);
+    if (!parent || parent.type !== "dir" || !name) return false;
+    const existing = parent.children[name];
+    if (existing && existing.type === "dir") return false;
+    const info = meta || {};
+    parent.children[name] = {
+      type: "file",
+      mode: info.mode || (existing ? existing.mode : "0644"),
+      owner: info.owner || (existing ? existing.owner : "ftp"),
+      group: info.group || (existing ? existing.group : "ftp"),
+      mtime: info.mtime || new Date().toISOString(),
+      content,
+    };
+    return true;
+  }
+
+  function removeFile(absPath) {
+    const node = get(absPath);
+    if (!node || node.type !== "file") return null;
+    return removeNode(absPath);
+  }
+
+  function removeDir(absPath) {
+    const node = get(absPath);
+    if (!node || node.type !== "dir") return null;
+    if (Object.keys(node.children || {}).length > 0) return null;
+    return removeNode(absPath);
+  }
+
+  function rename(oldPath, newPath) {
+    const node = get(oldPath);
+    if (!node) return false;
+    const { parent, name } = parentAndName(newPath);
+    if (!parent || parent.type !== "dir" || !name) return false;
+    const removed = removeNode(oldPath);
+    if (!removed) return false;
+    parent.children[name] = removed;
+    return true;
+  }
+
   return {
     root,
     resolve: resolvePath,
@@ -184,5 +244,11 @@ export function createVfs(seed) {
     removeNode,
     setNode,
     ensureUserHome,
+    stat,
+    mkdir,
+    writeFile,
+    removeFile,
+    removeDir,
+    rename,
   };
 }

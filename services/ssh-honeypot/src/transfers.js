@@ -29,14 +29,14 @@ function basenameFromPath(path) {
   return last === "" ? "index.html" : last;
 }
 
-function fictionalSize(urlText) {
+function downloadSize(urlText) {
   return 1024 + ((urlText.length * 37) % 50000);
 }
 
 /**
  * Emulate wget. Returns output, exit code, saved file info and
  * transfer metadata, or an error result. No I/O happens here;
- * the caller creates the placeholder file in the vfs.
+ * the caller creates the downloaded file in the vfs.
  *
  * @param {string[]} args
  * @returns {{ output: string, exitCode: number, savedAs: string | null, url: string | null, tool: string, size: number }}
@@ -75,7 +75,7 @@ export function emulateWget(args) {
     return { output: `wget: ${urlText}: Invalid URL\n`, exitCode: 8, savedAs: null, url: urlText, tool: "wget", size: 0 };
   }
   const savedAs = outputFile || basenameFromPath(parsed.path);
-  const size = fictionalSize(urlText);
+  const size = downloadSize(urlText);
   if (quiet) {
     return { output: "", exitCode: 0, savedAs, url: urlText, tool: "wget", size };
   }
@@ -139,7 +139,7 @@ export function emulateCurl(args) {
     return { output: `curl: (3) URL rejected: Bad hostname\n`, exitCode: 3, savedAs: null, url: urlText, tool: "curl", size: 0 };
   }
   const savedAs = outputFile || basenameFromPath(parsed.path);
-  const size = fictionalSize(urlText);
+  const size = downloadSize(urlText);
   const output = `  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n100  ${size}  100  ${size}    0     0   8000      0 --:--:-- --:--:-- --:--:--  8000\n`;
   return { output, exitCode: 0, savedAs, url: urlText, tool: "curl", size };
 }

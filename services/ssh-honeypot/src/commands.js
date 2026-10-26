@@ -2,6 +2,15 @@ import { tokenize, splitCommands, hasUnsupportedSyntax, expandToken } from "./pa
 import { staticTableRespond, isStaticTableCommand, staticRespond } from "../../../packages/llm/src/static.js";
 import { emulateWget, emulateCurl } from "./transfers.js";
 
+function downloadContentByExtension(savedAs) {
+  const name = String(savedAs || "");
+  if (name.endsWith(".sh")) return "#!/bin/sh\n";
+  if (name.endsWith(".py")) return "#!/usr/bin/env python3\n";
+  if (name.endsWith(".php")) return "<?php\n";
+  if (name.endsWith(".html") || name.endsWith(".htm")) return "<html></html>\n";
+  return "";
+}
+export { downloadContentByExtension };
 const KERNEL_RELEASE = "5.15.0-91-generic";
 const KERNEL_VERSION = "#101-Ubuntu SMP Tue Nov 14 13:30:08 UTC 2023";
 const MACHINE = "x86_64";
@@ -186,7 +195,7 @@ function parseRedirect(line) {
  * @param {(() => number) | number} [options.now]
  * @returns {{ run: (line: string, opts?: object) => Promise<object>, prompt: () => string, cwd: () => string, getNotes: () => string[] }}
  */
-export function createCommandEngine({ vfs, user, hostname, fallback, llm, config, sessionId, sourceIp, now }) {
+export function createCommandEngine({ vfs, user, hostname, fallback, llm, config, sessionId, sourceIp, now, persona }) {
   const home = user.name === "root" ? "/root" : `/home/${user.name}`;
   let cwd = home;
   let oldpwd = null;
@@ -952,7 +961,7 @@ export function createCommandEngine({ vfs, user, hostname, fallback, llm, config
         return { output: `wget: cannot create file '${result.savedAs}': Is a directory\n`, exitCode: 1, handled: true, handledBy: "engine", shouldExit: false, transfer: { tool: "wget", url: result.url, savedAs: result.savedAs, direction: "download" } };
       }
       if (existing) vfs.removeNode(filePath);
-      vfs.mkdirNode(filePath, { type: "file", mode: "0644", owner: user.name, group: user.name, mtime: nowIso(), content: "# placeholder", size: result.size });
+      vfs.mkdirNode(filePath, { type: "file", mode: "0644", owner: user.name, group: user.name, mtime: nowIso(), content: downloadContentByExtension(result.savedAs), size: result.size });
       return { output: result.output, exitCode: result.exitCode, handled: true, handledBy: "engine", shouldExit: false, transfer: { tool: "wget", url: result.url, savedAs: result.savedAs, direction: "download" } };
     }
     if (first === "curl") {
@@ -980,7 +989,7 @@ export function createCommandEngine({ vfs, user, hostname, fallback, llm, config
         return { output: `curl: cannot create file '${result.savedAs}': Is a directory\n`, exitCode: 1, handled: true, handledBy: "engine", shouldExit: false, transfer: { tool: "curl", url: result.url, savedAs: result.savedAs, direction: "download" } };
       }
       if (existing) vfs.removeNode(filePath);
-      vfs.mkdirNode(filePath, { type: "file", mode: "0644", owner: user.name, group: user.name, mtime: nowIso(), content: "# placeholder", size: result.size });
+      vfs.mkdirNode(filePath, { type: "file", mode: "0644", owner: user.name, group: user.name, mtime: nowIso(), content: downloadContentByExtension(result.savedAs), size: result.size });
       return { output: result.output, exitCode: result.exitCode, handled: true, handledBy: "engine", shouldExit: false, transfer: { tool: "curl", url: result.url, savedAs: result.savedAs, direction: "download" } };
     }
     return null;
@@ -1072,12 +1081,12 @@ export function createCommandEngine({ vfs, user, hostname, fallback, llm, config
       return { output: "", exitCode: 130, handled: true, handledBy: "aborted", shouldExit: false, meta: null };
     }
     if (winner && winner.deadline) {
-      const staticResult = staticRespond(commandString, { user: user.name, cwd, hostname, sessionId: sessionIdValue, sourceIp: sourceIpValue, now: nowFn });
+      const staticResult = staticRespond(commandString, { user: user.name, cwd, hostname, sessionId: sessionIdValue, sourceIp: sourceIpValue, now: nowFn, persona });
       return { output: staticResult.output, exitCode: staticResult.exitCode, handled: !isCommandNotFound(staticResult.output, staticResult.exitCode), handledBy: "static", shouldExit: false, meta: null };
     }
     const llmResult = winner && winner.value ? winner.value : null;
     if (!llmResult || typeof llmResult.output !== "string") {
-      const staticResult = staticRespond(commandString, { user: user.name, cwd, hostname, sessionId: sessionIdValue, sourceIp: sourceIpValue, now: nowFn });
+      const staticResult = staticRespond(commandString, { user: user.name, cwd, hostname, sessionId: sessionIdValue, sourceIp: sourceIpValue, now: nowFn, persona });
       return { output: staticResult.output, exitCode: staticResult.exitCode, handled: !isCommandNotFound(staticResult.output, staticResult.exitCode), handledBy: "static", shouldExit: false, meta: null };
     }
     const meta = llmResult.meta || {};
@@ -1140,12 +1149,12 @@ export function createCommandEngine({ vfs, user, hostname, fallback, llm, config
         const isPs = normalized === "ps" || normalized === "ps aux" || normalized === "ps -ef";
         const currentPsSeq = psSeq;
         if (isPs) psSeq += 1;
-        const table = staticTableRespond(commandString, { user: user.name, cwd, hostname, sessionId: sessionIdValue, sourceIp: sourceIpValue, now: nowFn, psSeq: currentPsSeq });
+        const table = staticTableRespond(commandString, { user: user.name, cwd, hostname, sessionId: sessionIdValue, sourceIp: sourceIpValue, now: nowFn, psSeq: currentPsSeq, persona });
         return { output: table.output, exitCode: table.exitCode, handled: true, handledBy: "static", shouldExit: false };
       }
       const llmResult = await runLlm(commandString, signal);
       if (llmResult.handledBy === "static" && llmResult.meta === null) {
-        const table = staticTableRespond(commandString, { user: user.name, cwd, hostname, sessionId: sessionIdValue, sourceIp: sourceIpValue, now: nowFn, psSeq });
+        const table = staticTableRespond(commandString, { user: user.name, cwd, hostname, sessionId: sessionIdValue, sourceIp: sourceIpValue, now: nowFn, psSeq, persona });
         if (normalized === "ps" || normalized === "ps aux" || normalized === "ps -ef") psSeq += 1;
         return { output: table.output, exitCode: table.exitCode, handled: true, handledBy: "static", shouldExit: false };
       }
