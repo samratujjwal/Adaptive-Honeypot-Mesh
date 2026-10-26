@@ -1,6 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { config } from "../../../packages/shared/src/config.js";
 import { createFileSink } from "../../../packages/shared/src/event-sink.js";
+import { createSinkFactory } from "../../../packages/bus/src/sink-factory.js";
+import { createKafkaClient } from "../../../packages/bus/src/kafka-client.js";
 import { logger } from "../../../packages/shared/src/logger.js";
 import { createLlmService } from "../../../packages/llm/src/service.js";
 import { createHttpHoneypot } from "./server.js";
@@ -17,7 +19,17 @@ import { createHttpHoneypot } from "./server.js";
  */
 export async function start(deps) {
   const cfg = (deps && deps.config) || config;
-  const sink = (deps && deps.sink) || createFileSink({ dir: cfg.EVENT_DIR, service: "http" });
+  let localFactory = null;
+  let sink = deps && deps.sink;
+  if (!sink && deps && deps.sinkFactory) sink = deps.sinkFactory.create("http");
+  if (!sink) {
+    if (cfg.KAFKA_ENABLED) {
+      localFactory = createSinkFactory({ config: cfg, logger: (deps && deps.logger) || logger, kafkaClient: createKafkaClient({ config: cfg, logger: (deps && deps.logger) || logger }) });
+      sink = localFactory.create("http");
+    } else {
+      sink = createFileSink({ dir: cfg.EVENT_DIR, service: "http" });
+    }
+  }
   const log = (deps && deps.logger) || logger;
   const llmService = (deps && deps.llmService) || createLlmService({ config: cfg, logger: log });
   const honeypot = createHttpHoneypot({ config: cfg, sink, llmService });
@@ -34,6 +46,9 @@ export async function start(deps) {
       sink.close();
     } catch {
       /* Ignore. */
+    }
+    if (localFactory) {
+      try { await localFactory.close(); } catch {}
     }
   }
   return { http: honeypot, close };

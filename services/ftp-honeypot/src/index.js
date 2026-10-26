@@ -3,6 +3,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "../../../packages/shared/src/config.js";
 import { createFileSink } from "../../../packages/shared/src/event-sink.js";
+import { createSinkFactory } from "../../../packages/bus/src/sink-factory.js";
+import { createKafkaClient } from "../../../packages/bus/src/kafka-client.js";
 import { logger } from "../../../packages/shared/src/logger.js";
 import { createFtpHoneypot } from "./server.js";
 
@@ -32,7 +34,17 @@ function loadCredentials() {
  */
 export async function start(deps) {
   const cfg = (deps && deps.config) || config;
-  const sink = (deps && deps.sink) || createFileSink({ dir: cfg.EVENT_DIR, service: "ftp" });
+  let localFactory = null;
+  let sink = deps && deps.sink;
+  if (!sink && deps && deps.sinkFactory) sink = deps.sinkFactory.create("ftp");
+  if (!sink) {
+    if (cfg.KAFKA_ENABLED) {
+      localFactory = createSinkFactory({ config: cfg, logger: (deps && deps.logger) || logger, kafkaClient: createKafkaClient({ config: cfg, logger: (deps && deps.logger) || logger }) });
+      sink = localFactory.create("ftp");
+    } else {
+      sink = createFileSink({ dir: cfg.EVENT_DIR, service: "ftp" });
+    }
+  }
   const log = (deps && deps.logger) || logger;
   const credentials = (deps && deps.credentials) || loadCredentials();
   const ftp = createFtpHoneypot({ config: cfg, sink, logger: log, credentials });
@@ -49,6 +61,9 @@ export async function start(deps) {
       sink.close();
     } catch {
       /* Ignore. */
+    }
+    if (localFactory) {
+      try { await localFactory.close(); } catch {}
     }
   }
   return { ftp, close };

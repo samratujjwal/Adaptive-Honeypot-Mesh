@@ -76,7 +76,16 @@ const configSchema = z
     LLM_TEMPERATURE: z.coerce.number().min(0).max(1).default(0.4),
     GEMINI_THINKING_BUDGET: z.coerce.number().int().min(0).default(0),
     LLM_USAGE_FILE: z.string().min(1).default("data/llm-usage.json"),
+    KAFKA_ENABLED: z.union([z.boolean(), z.enum(["true", "false"])]).transform((value) => value === true || value === "true").default(false),
     KAFKA_BROKERS: z.string().min(1).default("localhost:9092"),
+    KAFKA_TOPIC: z.string().min(1).refine((value) => !value.includes(" "), "KAFKA_TOPIC must not contain spaces").default("honeypot.events"),
+    KAFKA_CLIENT_ID_PREFIX: z.string().min(1).default("honeypot"),
+    KAFKA_BUFFER_MAX: z.coerce.number().int().positive().default(5000),
+    KAFKA_BATCH_MAX: z.coerce.number().int().positive().default(200),
+    KAFKA_FLUSH_MS: z.coerce.number().int().positive().default(500),
+    KAFKA_SEND_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+    KAFKA_SHUTDOWN_FLUSH_MS: z.coerce.number().int().positive().default(3000),
+    KAFKA_MAX_MESSAGE_BYTES: z.coerce.number().int().positive().default(262144),
     ELASTICSEARCH_URL: z.string().url().default("http://localhost:9200"),
     NODE_ID: z.string().min(1).default("node-01"),
   })
@@ -93,6 +102,13 @@ const configSchema = z
     }
     if (value.FTP_PASV_MIN_PORT > value.FTP_PASV_MAX_PORT) {
       ctx.addIssue({ code: "custom", path: ["FTP_PASV_MIN_PORT"], message: "FTP_PASV_MIN_PORT must be less than or equal to FTP_PASV_MAX_PORT" });
+    }
+    for (const item of String(value.KAFKA_BROKERS).split(",")) {
+      const trimmed = item.trim();
+      if (!/^[^: \s]+:\d+$/.test(trimmed)) {
+        ctx.addIssue({ code: "custom", path: ["KAFKA_BROKERS"], message: "KAFKA_BROKERS must be a comma separated list of host:port" });
+        break;
+      }
     }
     if ((value.BIND_HOST === "0.0.0.0" || value.BIND_HOST === "::") && !value.ALLOW_PUBLIC_BIND) {
       ctx.addIssue({

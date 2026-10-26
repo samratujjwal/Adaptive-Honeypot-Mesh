@@ -62,3 +62,19 @@ npm run start:all
 Ports (defaults, configurable via .env): SSH 2222, HTTP 8080, FTP 2121.
 Events are written to the EVENT_DIR directory as ssh.jsonl, http.jsonl
 and ftp.jsonl. Everything binds to loopback only (127.0.0.1 by default).
+
+## Kafka
+
+Stream every honeypot event to Kafka without slowing down the honeypots.
+The local JSONL files stay the durable record.
+
+```sh
+docker compose up -d kafka
+npm run kafka:setup
+KAFKA_ENABLED=true npm run start:all
+npm run kafka:tail -- 20
+```
+
+When Kafka is down: honeypots keep running, files keep being written,
+and the Kafka queue retries with backoff until the broker comes back.
+Set KAFKA_ENABLED=true in .env to enable streaming; by default it is off.
