@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MESH CONSOLE</title>
+<link rel="stylesheet" href="style.css">
+<script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+<header class="topbar">
+<div class="topbar-left">
+<span class="brand">MESH CONSOLE</span>
+<span class="node">node-01</span>
+<span class="status" id="status-line">ES reachable: unknown | Kafka: unknown | Last event: none</span>
+</div>
+<div class="topbar-right"><span id="clock-utc">--</span></div>
+</header>
+<div class="banner" id="offline-banner" hidden>Live feed offline, polling</div>
+<main class="layout">
+<section class="panel feed-panel" id="live-feed">
+<h2>Live feed</h2>
+<p class="empty" id="feed-empty">No live documents yet.</p>
+<table class="feed-table">
+<thead><tr><th>Time</th><th>Kind</th><th>ID</th><th>Detail</th></tr></thead>
+<tbody id="feed-rows"></tbody>
+</table>
+</section>
+<aside class="sidecol">
+<section class="panel" id="stats-cards">
+<h2>Stats</h2>
+<p class="empty" id="stats-empty">No stats yet.</p>
+<div id="stats-body"></div>
+<h3>Events by service</h3>
+<div id="events-by-service"></div>
+<h3>Sources</h3>
+<div id="top-ips"></div>
+<h3>Top tools</h3>
+<div id="top-tools"></div>
+</section>
+<section class="panel" id="top-commands">
+<h2>Top commands</h2>
+<p class="empty" id="commands-empty">No commands yet.</p>
+<ol id="commands-list"></ol>
+</section>
+</aside>
+<section class="panel wide" id="timeline">
+<h2>Timeline</h2>
+<p class="empty" id="timeline-empty">No events in the last 24 hours.</p>
+<div class="timeline-bars" id="timeline-bars"></div>
+</section>
+<section class="panel wide" id="attack-heatmap">
+<h2>ATT&amp;CK heatmap</h2>
+<p class="empty" id="heatmap-empty">No techniques yet.</p>
+<div class="heatmap-grid" id="heatmap-grid"></div>
+<p class="note" id="heatmap-dropped"></p>
+</section>
+<section class="panel wide" id="world-map">
+<h2>Sources</h2>
+<p class="empty" id="map-empty">No sources yet.</p>
+<ul id="map-list"></ul>
+</section>
+</main>
+<footer class="footer">
+<span>API base 127.0.0.1:3001</span>
+<span>Poll interval 5000ms</span>
+<span id="last-poll">Last poll: none</span>
+<span id="footer-totals">Totals: none</span>
+</footer>
+<script type="module" src="app.js"></script>
+</body>
+</html>

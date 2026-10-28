@@ -1,0 +1,38 @@
+* { box-sizing: border-box; }
+body { margin: 0; background: #101418; color: #e6e9ee; font-family: system-ui, "Segoe UI", sans-serif; font-size: 13px; }
+.topbar { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #171c22; border-bottom: 1px solid #262d36; }
+.brand { font-weight: 700; letter-spacing: 0.08em; }
+.node { color: #8b949e; margin-left: 16px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.status { color: #8b949e; margin-left: 16px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.topbar-right { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #8b949e; }
+.banner { padding: 8px 16px; background: #171c22; border-bottom: 1px solid #d99a26; color: #d99a26; }
+.layout { display: grid; grid-template-columns: 1fr 320px; gap: 8px; padding: 8px; }
+.panel { background: #171c22; border: 1px solid #262d36; border-radius: 6px; padding: 8px; }
+.wide { grid-column: 1 / -1; }
+.feed-panel { min-width: 0; }
+.sidecol { display: flex; flex-direction: column; gap: 8px; }
+h2 { margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; color: #8b949e; }
+h3 { margin: 8px 0 4px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; color: #8b949e; }
+.empty { color: #8b949e; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.feed-table { width: 100%; border-collapse: collapse; }
+.feed-table th, .feed-table td { text-align: left; padding: 4px; border-bottom: 1px solid #262d36; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.dot { display: inline-block; width: 8px; height: 8px; background: #d99a26; border-radius: 4px; margin-right: 4px; }
+.tag { display: inline-block; padding: 0 4px; border: 1px solid #262d36; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+.tag-contain { border-color: #c94f4f; color: #c94f4f; }
+.tag-deceive { border-color: #d99a26; color: #d99a26; }
+.tag-engage, .tag-observe { border-color: #8b949e; color: #8b949e; }
+.timeline-bars { display: flex; align-items: flex-end; gap: 4px; height: 120px; }
+.hour-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.hour-bar { width: 100%; background: #d99a26; }
+.hour-label, .hour-count { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; color: #8b949e; }
+.heatmap-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+.heat-cell { width: 96px; min-height: 64px; padding: 4px; border: 1px solid #262d36; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+.heat-0 { background: #262d36; color: #8b949e; }
+.heat-1 { background: #3a3324; color: #e6e9ee; }
+.heat-2 { background: #6b5420; color: #e6e9ee; }
+.heat-3 { background: #a67c1e; color: #101418; }
+.heat-4 { background: #d99a26; color: #101418; }
+.note { color: #8b949e; }
+.footer { display: flex; flex-wrap: wrap; gap: 16px; padding: 8px 16px; border-top: 1px solid #262d36; color: #8b949e; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.trunc { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -4,6 +4,7 @@ export { eventsIndexName } from "./index-name.js";
 export { createBulkIndexer } from "./bulk-indexer.js";
 export { ensureTemplates } from "./setup.js";
 export { getSessions } from "./session-store.js";
+export { searchEvents, searchSessions, searchProfiles, searchAttackers, getAttackerByIp, getStats } from "./reads.js";
 export { validateDocument } from "./validate.js";
 
 /**

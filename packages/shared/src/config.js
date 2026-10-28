@@ -97,6 +97,9 @@ const configSchema = z
     PROCESSOR_DEAD_LETTER_FILE: z.string().min(1).default("data/dead-letter.jsonl"),
     PROCESSOR_DEAD_LETTER_MAX_BYTES: z.coerce.number().int().positive().default(10485760),
     GEOIP_ENABLED: z.union([z.boolean(), z.enum(["true", "false"])]).transform((value) => value === true || value === "true").default(true),
+    API_HOST: z.string().min(1).default("127.0.0.1"),
+    API_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
+    API_POLL_MS: z.coerce.number().int().min(100).default(5000),
     NODE_ID: z.string().min(1).default("node-01"),
   })
   .superRefine((value, ctx) => {
