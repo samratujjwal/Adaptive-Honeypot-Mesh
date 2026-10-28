@@ -47,6 +47,7 @@ export function createSshHoneypot(options) {
   const credentials = options.credentials || loadCredentials(options.credentialsPath || defaultCredentialsPath());
   const persona = options.persona || createPersona({ seed: config.PERSONA_SEED || "change-me-default-seed", hostname: config.HONEYPOT_HOSTNAME, domain: config.HONEYPOT_DOMAIN });
   const honeytokens = options.honeytokens || createHoneytokens(persona, { enabled: config.HONEYTOKENS_ENABLED !== false });
+  const lastLogins = new Map();
   if (config.PERSONA_SEED === "change-me-default-seed") {
     try { log.warn("PERSONA_SEED is the default value; set your own random seed in .env"); } catch {}
   }
@@ -272,11 +273,13 @@ export function createSshHoneypot(options) {
       sessionChannel.on("shell", (shellAccept) => {
         resetIdle(session);
         const stream = shellAccept();
+        const shownLogin = lastLogins.get(session.username) || persona.host.previousLogin;
         shellSession = createShellSession({
           stream,
           username: session.username,
           hostname: config.HONEYPOT_HOSTNAME,
           sourceIp: session.sourceIp,
+          lastLogin: shownLogin,
           engine: getEngine(),
           maxPendingInput: config.SSH_MAX_PENDING_INPUT,
           onPendingChange: (isPending) => {
@@ -330,6 +333,7 @@ export function createSshHoneypot(options) {
             closeConnection(session, "client_disconnect");
           }
         });
+        lastLogins.set(session.username, { time: new Date().toISOString(), sourceIp: session.sourceIp });
         shellSession.welcome();
       });
       sessionChannel.on("exec", (execAccept, _reject, info) => {

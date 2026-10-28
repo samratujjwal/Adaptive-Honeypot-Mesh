@@ -1,0 +1,10 @@
+{
+  "main": "src/index.js",
+  "name": "@honeypot-mesh/enrich",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "dependencies": {
+    "fast-geoip": "1.1.88"
+  }
+}

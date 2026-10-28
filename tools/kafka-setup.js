@@ -1,7 +1,12 @@
 import { fileURLToPath } from "node:url";
 import { config } from "../packages/shared/src/config.js";
 import { logger } from "../packages/shared/src/logger.js";
-import { createKafkaClient } from "../packages/bus/src/kafka-client.js";
+import { createKafkaClient, KAFKA_LOG_LEVEL_NOTHING } from "../packages/bus/src/kafka-client.js";
+
+export function kafkaBrokerErrorLine(config) {
+  const first = String(config.KAFKA_BROKERS || "localhost:9092").split(",")[0].trim();
+  return `Cannot reach Kafka at ${first}. Is it running? (docker compose up -d kafka)`;
+}
 
 /**
  * Idempotently create the Kafka topic. Accepts an injected client.
@@ -15,7 +20,7 @@ import { createKafkaClient } from "../packages/bus/src/kafka-client.js";
 export async function setupKafka(deps) {
   const cfg = (deps && deps.config) || config;
   const log = (deps && deps.logger) || logger;
-  const client = (deps && deps.kafkaClient) || createKafkaClient({ config: cfg, logger: log });
+  const client = (deps && deps.kafkaClient) || createKafkaClient({ config: cfg, logger: log, logLevel: KAFKA_LOG_LEVEL_NOTHING });
   const admin = client.admin();
   try {
     if (typeof admin.connect === "function") await admin.connect();
@@ -46,9 +51,9 @@ if (isMain) {
       else console.log(`Topic ${config.KAFKA_TOPIC} already exists with ${result.partitions} partitions`);
       process.exit(0);
     })
-    .catch((error) => {
+    .catch(() => {
       clearTimeout(timeout);
-      console.error(`Kafka setup failed: ${error.message}`);
+      console.error(kafkaBrokerErrorLine(config));
       process.exit(1);
     });
 }

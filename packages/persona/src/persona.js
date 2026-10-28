@@ -118,6 +118,14 @@ export function createPersona(options = {}) {
   const diskSize = 30 + rng.nextInt(30);
   const diskUsed = 8 + rng.nextInt(10);
   const memTotal = 3800 + rng.nextInt(400);
+  const prevRng = prng(`${seed}:previous-login`);
+  const bootMs = Date.parse(bootTime);
+  const prevDays = prevRng.nextInt(20) + 1;
+  const prevSeconds = prevRng.nextInt(86400);
+  const previousLogin = {
+    time: new Date(bootMs + prevDays * 86400000 + prevSeconds * 1000).toISOString().replace(/\.\d+Z$/, "Z"),
+    sourceIp: `10.8.0.${prevRng.nextInt(200) + 2}`,
+  };
   const persona = {
     seed,
     nodeId: options.nodeId || "node-01",
@@ -136,6 +144,7 @@ export function createPersona(options = {}) {
       privateIp,
       mac,
       bootTime,
+      previousLogin,
     },
     versions: {
       openssh: "OpenSSH_8.9p1 Ubuntu-3ubuntu0.6",

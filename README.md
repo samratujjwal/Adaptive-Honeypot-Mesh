@@ -78,3 +78,33 @@ npm run kafka:tail -- 20
 When Kafka is down: honeypots keep running, files keep being written,
 and the Kafka queue retries with backoff until the broker comes back.
 Set KAFKA_ENABLED=true in .env to enable streaming; by default it is off.
+
+## Processor and Elasticsearch
+
+The processor consumes honeypot events from Kafka, enriches them
+(geoip + IP classification), aggregates per-session summaries and
+indexes everything into Elasticsearch.
+
+```sh
+docker compose up -d kafka elasticsearch
+npm run kafka:setup
+npm run es:setup
+KAFKA_ENABLED=true npm run start:all
+npm run start:processor
+npm run es:summary
+```
+
+Curl examples (loopback only):
+
+```sh
+curl http://localhost:9200/honeypot-events-*/_search?pretty -H 'Content-Type: application/json' -d '{"query":{"match_all":{}}}'
+curl http://localhost:9200/honeypot-sessions/_search?pretty -H 'Content-Type: application/json' -d '{"query":{"match_all":{}}}'
+```
+
+Invalid messages and permanently rejected documents go to the dead
+letter file at data/dead-letter.jsonl (PROCESSOR_DEAD_LETTER_FILE),
+which stops growing at PROCESSOR_DEAD_LETTER_MAX_BYTES.
+
+Known limitation: a crash between the Elasticsearch write and the
+offset commit can re-deliver messages; events stay exact (same _id),
+session counters are protected by the last-200 id window only.

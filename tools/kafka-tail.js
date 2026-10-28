@@ -1,7 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { config } from "../packages/shared/src/config.js";
 import { logger } from "../packages/shared/src/logger.js";
-import { createKafkaClient } from "../packages/bus/src/kafka-client.js";
+import { createKafkaClient, KAFKA_LOG_LEVEL_NOTHING } from "../packages/bus/src/kafka-client.js";
+import { kafkaBrokerErrorLine } from "./kafka-setup.js";
 
 /**
  * Tail the Kafka topic, printing one summary line per message.
@@ -19,7 +20,7 @@ export async function tailKafka(deps) {
   const cfg = (deps && deps.config) || config;
   const log = (deps && deps.logger) || logger;
   const print = (deps && deps.print) || console.log;
-  const client = (deps && deps.kafkaClient) || createKafkaClient({ config: cfg, logger: log });
+  const client = (deps && deps.kafkaClient) || createKafkaClient({ config: cfg, logger: log, logLevel: KAFKA_LOG_LEVEL_NOTHING });
   const groupId = `kafka-tail-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
   const consumer = client.consumer(groupId);
   let count = 0;
@@ -73,8 +74,8 @@ if (isMain) {
   const limit = Number(process.argv[2]) || 20;
   tailKafka({ limit })
     .then(() => process.exit(0))
-    .catch((error) => {
-      console.error(`Kafka tail failed: ${error.message}`);
+    .catch(() => {
+      console.error(kafkaBrokerErrorLine(config));
       process.exit(1);
     });
 }

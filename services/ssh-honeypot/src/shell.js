@@ -20,7 +20,16 @@ export const MAX_SESSION_INPUT_BYTES = 1024 * 1024;
  * @param {(pending: boolean) => void} [options.onPendingChange]
  * @returns {{ handleData: (data: Buffer) => void, prompt: () => void, welcome: () => void, isPending: () => boolean }}
  */
-export function createShellSession({ stream, username, hostname, sourceIp, engine, onCommand, onLogout, onBytesOut, maxPendingInput, onPendingChange }) {
+export function formatLastLogin(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const pad = (n) => String(n).padStart(2, "0");
+  const padDay = String(d.getUTCDate()).padStart(2, " ");
+  return `${days[d.getUTCDay()]} ${months[d.getUTCMonth()]} ${padDay} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} ${d.getUTCFullYear()}`;
+}
+
+export function createShellSession({ stream, username, hostname, sourceIp, engine, onCommand, onLogout, onBytesOut, maxPendingInput, onPendingChange, lastLogin }) {
   let line = "";
   let keystrokeCount = 0;
   let usedBackspace = false;
@@ -245,7 +254,8 @@ export function createShellSession({ stream, username, hostname, sourceIp, engin
     write("Welcome to Ubuntu 22.04.3 LTS (GNU/Linux 5.15.0-91-generic x86_64)\r\n");
     write(" * Documentation:  https://help.ubuntu.com\r\n");
     write(" * Management:     https://landscape.canonical.com\r\n");
-    write(`Last login: ${new Date().toString()} from ${sourceIp}\r\n`);
+    const shown = lastLogin || { time: new Date().toISOString(), sourceIp };
+    write(`Last login: ${formatLastLogin(shown.time)} from ${shown.sourceIp}\r\n`);
     showPrompt();
   }
 

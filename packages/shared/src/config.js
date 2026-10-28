@@ -87,6 +87,16 @@ const configSchema = z
     KAFKA_SHUTDOWN_FLUSH_MS: z.coerce.number().int().positive().default(3000),
     KAFKA_MAX_MESSAGE_BYTES: z.coerce.number().int().positive().default(262144),
     ELASTICSEARCH_URL: z.string().url().default("http://localhost:9200"),
+    ES_INDEX_PREFIX: z.string().min(1).default("honeypot"),
+    PROCESSOR_GROUP_ID: z.string().min(1).default("honeypot-processor"),
+    PROCESSOR_BATCH_MAX: z.coerce.number().int().positive().default(500),
+    PROCESSOR_FLUSH_MS: z.coerce.number().int().positive().default(1000),
+    PROCESSOR_ES_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+    PROCESSOR_SESSION_CACHE_MAX: z.coerce.number().int().positive().default(10000),
+    PROCESSOR_SESSION_IDLE_MS: z.coerce.number().int().positive().default(1800000),
+    PROCESSOR_DEAD_LETTER_FILE: z.string().min(1).default("data/dead-letter.jsonl"),
+    PROCESSOR_DEAD_LETTER_MAX_BYTES: z.coerce.number().int().positive().default(10485760),
+    GEOIP_ENABLED: z.union([z.boolean(), z.enum(["true", "false"])]).transform((value) => value === true || value === "true").default(true),
     NODE_ID: z.string().min(1).default("node-01"),
   })
   .superRefine((value, ctx) => {

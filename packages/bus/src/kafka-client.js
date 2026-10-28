@@ -1,4 +1,6 @@
-import { Kafka, Partitioners } from "kafkajs";
+import { Kafka, Partitioners, logLevel } from "kafkajs";
+
+export const KAFKA_LOG_LEVEL_NOTHING = logLevel.NOTHING;
 
 /**
  * Create a thin kafkajs client. This is the only file that imports
@@ -9,7 +11,7 @@ import { Kafka, Partitioners } from "kafkajs";
  * @param {object} [options.logger]
  * @returns {{ producer: () => object, admin: () => object, consumer: (groupId: string) => object }}
  */
-export function createKafkaClient({ config, logger }) {
+export function createKafkaClient({ config, logger, logLevel: injectedLogLevel }) {
   const log = logger || { info: () => {}, warn: () => {}, error: () => {} };
   const kafka = new Kafka({
     clientId: `${config.KAFKA_CLIENT_ID_PREFIX}-${config.NODE_ID}`,
@@ -17,6 +19,7 @@ export function createKafkaClient({ config, logger }) {
     connectionTimeout: 3000,
     requestTimeout: config.KAFKA_SEND_TIMEOUT_MS,
     retry: { initialRetryTime: 100, retries: 3 },
+    ...(injectedLogLevel !== undefined ? { logLevel: injectedLogLevel } : {}),
     logCreator: () => ({ namespace, level, label, log: entry }) => {
       const message = entry && entry.message ? entry.message : "";
       const text = `${label} ${message}`.trim();
