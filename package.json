@@ -8,7 +8,7 @@
     "lint:compose": "docker compose config -q",
     "guard": "node tools/guard.js",
     "start:ssh": "node services/ssh-honeypot/src/index.js",
-    "test": "node --test --test-reporter=spec packages/shared/test/config.test.js packages/shared/test/event.test.js packages/shared/test/logger.test.js packages/shared/test/sink.test.js packages/llm/test/llm.test.js services/ssh-honeypot/test/vfs.test.js services/ssh-honeypot/test/parser.test.js services/ssh-honeypot/test/commands.test.js services/ssh-honeypot/test/ssh.test.js services/ssh-honeypot/test/day5.test.js services/http-honeypot/test/http.test.js packages/vfs/test/vfs.test.js services/ftp-honeypot/test/ftp.test.js packages/persona/test/persona.test.js packages/bus/test/bus.test.js services/processor/test/processor.test.js packages/enrich/test/enrich.test.js packages/search/test/search.test.js",
+    "test": "node --test --test-reporter=spec packages/shared/test/config.test.js packages/shared/test/event.test.js packages/shared/test/logger.test.js packages/shared/test/sink.test.js packages/llm/test/llm.test.js services/ssh-honeypot/test/vfs.test.js services/ssh-honeypot/test/parser.test.js services/ssh-honeypot/test/commands.test.js services/ssh-honeypot/test/ssh.test.js services/ssh-honeypot/test/day5.test.js services/http-honeypot/test/http.test.js packages/vfs/test/vfs.test.js services/ftp-honeypot/test/ftp.test.js packages/persona/test/persona.test.js packages/bus/test/bus.test.js services/processor/test/processor.test.js packages/enrich/test/enrich.test.js packages/search/test/search.test.js packages/mitre/test/mitre.test.js services/processor/test/startup.test.js",
     "llm:demo": "node tools/llm-demo.js",
     "start:http": "node services/http-honeypot/src/index.js",
     "start:all": "node tools/start-all.js",
@@ -17,7 +17,8 @@
     "kafka:tail": "node tools/kafka-tail.js",
     "start:processor": "node services/processor/src/index.js",
     "es:setup": "node tools/es-setup.js",
-    "es:summary": "node tools/es-summary.js"
+    "es:summary": "node tools/es-summary.js",
+    "mitre:check": "node tools/mitre-check.js"
   },
   "type": "module",
   "version": "0.1.0",
@@ -29,6 +30,7 @@
     "packages/persona",
     "packages/bus",
     "packages/enrich",
-    "packages/search"
+    "packages/search",
+    "packages/mitre"
   ]
 }

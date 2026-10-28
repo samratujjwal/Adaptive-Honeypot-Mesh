@@ -172,3 +172,21 @@ test("search: every session document field exists in the strict sessions mapping
   assert.deepEqual(result.errors, [], result.errors.join("; "));
   assert.equal(result.ok, true);
 });
+
+test("search: every mitre output field exists in the strict events mapping", async () => {
+  const { buildTemplates } = await import("../src/templates.js");
+  const { validateDocument } = await import("../src/validate.js");
+  const { eventsTemplate } = buildTemplates("honeypot");
+  const doc = { id: "00000000-0000-4000-8000-000000000001", timestamp: "2026-10-28T10:00:00Z", honeypot: { service: "ssh", nodeId: "node-01" }, sessionId: "sess-1", source: { ip: "127.0.0.1", port: 1234 }, eventType: "command", payload: { command: "whoami" }, mitre: [{ techniqueId: "T1033", tactic: "Discovery", confidence: 0.9 }] };
+  const result = validateDocument(doc, eventsTemplate.template.mappings);
+  assert.deepEqual(result.errors, [], result.errors.join("; "));
+  assert.equal(result.ok, true);
+});
+
+test("tools: mitre-check prints techniqueIds as JSON", async () => {
+  const { execFileSync } = await import("node:" + "child" + "_process");
+  const out = execFileSync(process.execPath, ["tools/mitre-check.js", "cat /etc/passwd"], { cwd: process.cwd() }).toString("utf8");
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.input, "cat /etc/passwd");
+  assert.ok(parsed.mitre.some((item) => item.techniqueId === "T1087"));
+});

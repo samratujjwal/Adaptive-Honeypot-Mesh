@@ -162,6 +162,7 @@ export function createHttpHoneypot(options) {
       const payload = buildHttpPayload({
         method,
         path: rawPathname,
+        rawTarget: rawUrl,
         query,
         httpVersion,
         headers: req.headers,

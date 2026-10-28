@@ -6,6 +6,9 @@ import { createBulkIndexer } from "../../../packages/search/src/bulk-indexer.js"
 import { createGeoip } from "../../../packages/enrich/src/geoip.js";
 import { createProcessor } from "./processor.js";
 import { createConsumer } from "./consumer.js";
+import { ensureTemplates } from "../../../packages/search/src/setup.js";
+import { waitForStartup, createStartupChecks } from "./startup.js";
+import { createKafkaClient } from "../../../packages/bus/src/kafka-client.js";
 
 /**
  * Start the processor. Runs itself only when executed directly.
@@ -26,7 +29,12 @@ export async function start(deps) {
   const indexer = (deps && deps.indexer) || createBulkIndexer({ es, config: cfg, logger: log });
   const geoip = (deps && deps.geoip) || createGeoip({ enabled: cfg.GEOIP_ENABLED });
   const processor = createProcessor({ config: cfg, logger: log, geoip, indexer });
-  const consumer = createConsumer({ config: cfg, logger: log, kafkaClient: deps && deps.kafkaClient, processor });
+  const kafkaClient = (deps && deps.kafkaClient) || createKafkaClient({ config: cfg, logger: log });
+  const waitFn = (deps && deps.waitForStartupFn) || waitForStartup;
+  const ensureFn = (deps && deps.ensureTemplatesFn) || ensureTemplates;
+  await waitFn({ checks: createStartupChecks({ es, kafkaClient }), logger: log, sleep: deps && deps.sleep });
+  await ensureFn(es, { prefix: cfg.ES_INDEX_PREFIX });
+  const consumer = createConsumer({ config: cfg, logger: log, kafkaClient, processor });
   let statsTimer = null;
   if (!deps || !deps.noStatsTimer) {
     statsTimer = setInterval(() => {

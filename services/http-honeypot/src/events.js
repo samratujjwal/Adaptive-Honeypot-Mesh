@@ -41,6 +41,7 @@ export function buildHttpPayload(fields) {
   const payload = {
     method: fields.method,
     path: String(fields.path || "").slice(0, 2048),
+    ...(fields.rawTarget ? { rawTarget: String(fields.rawTarget).slice(0, 2048) } : {}),
     query: String(fields.query || "").slice(0, 2048),
     httpVersion: fields.httpVersion || "1.1",
     headers: filterHeaders(fields.headers),

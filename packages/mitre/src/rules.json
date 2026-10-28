@@ -1,0 +1,362 @@
+[
+  {
+    "ruleId": "whoami",
+    "techniqueId": "T1033",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "whoami",
+    "services": [
+      "ssh"
+    ],
+    "description": "whoami prints the current user"
+  },
+  {
+    "ruleId": "id-user",
+    "techniqueId": "T1033",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "id",
+    "services": [
+      "ssh"
+    ],
+    "description": "id prints user and group ids"
+  },
+  {
+    "ruleId": "uname",
+    "techniqueId": "T1082",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "uname",
+    "services": [
+      "ssh"
+    ],
+    "description": "uname prints system information"
+  },
+  {
+    "ruleId": "hostname",
+    "techniqueId": "T1082",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "hostname",
+    "services": [
+      "ssh"
+    ],
+    "description": "hostname prints the host name"
+  },
+  {
+    "ruleId": "ls-dir",
+    "techniqueId": "T1083",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "ls",
+    "services": [
+      "ssh"
+    ],
+    "description": "ls lists files and directories"
+  },
+  {
+    "ruleId": "dir-list",
+    "techniqueId": "T1083",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "dir",
+    "services": [
+      "ssh"
+    ],
+    "description": "dir lists files and directories"
+  },
+  {
+    "ruleId": "find-files",
+    "techniqueId": "T1083",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "find",
+    "services": [
+      "ssh"
+    ],
+    "description": "find searches the file tree"
+  },
+  {
+    "ruleId": "last-login",
+    "techniqueId": "T1087",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "last",
+    "services": [
+      "ssh"
+    ],
+    "description": "last lists recent logins"
+  },
+  {
+    "ruleId": "w-users",
+    "techniqueId": "T1087",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "w",
+    "services": [
+      "ssh"
+    ],
+    "description": "w lists logged-in users"
+  },
+  {
+    "ruleId": "cat-passwd",
+    "techniqueId": "T1087",
+    "tactic": "Discovery",
+    "confidence": 0.7,
+    "match": "regex",
+    "pattern": "\\bcat\\b\\s+\\S*etc/passwd\\b",
+    "services": [
+      "ssh"
+    ],
+    "description": "reading /etc/passwd lists accounts"
+  },
+  {
+    "ruleId": "cat-shadow",
+    "techniqueId": "T1003",
+    "tactic": "Credential Access",
+    "confidence": 0.7,
+    "match": "regex",
+    "pattern": "\\bcat\\b\\s+\\S*etc/shadow\\b",
+    "services": [
+      "ssh"
+    ],
+    "description": "reading /etc/shadow is credential dumping"
+  },
+  {
+    "ruleId": "cat-credentials-file",
+    "techniqueId": "T1552.001",
+    "tactic": "Credential Access",
+    "confidence": 0.7,
+    "match": "regex",
+    "pattern": "\\bcat\\b\\s+\\S*(\\.env|wp-config\\.php|id_rsa|config\\.bak|\\.git/config)\\b",
+    "services": [
+      "ssh"
+    ],
+    "description": "reading a file that commonly holds credentials"
+  },
+  {
+    "ruleId": "ps-list",
+    "techniqueId": "T1057",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "ps",
+    "services": [
+      "ssh"
+    ],
+    "description": "ps lists processes"
+  },
+  {
+    "ruleId": "top-list",
+    "techniqueId": "T1057",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "top",
+    "services": [
+      "ssh"
+    ],
+    "description": "top lists processes"
+  },
+  {
+    "ruleId": "pstree-list",
+    "techniqueId": "T1057",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "pstree",
+    "services": [
+      "ssh"
+    ],
+    "description": "pstree lists processes as a tree"
+  },
+  {
+    "ruleId": "ifconfig-net",
+    "techniqueId": "T1016",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "ifconfig",
+    "services": [
+      "ssh"
+    ],
+    "description": "ifconfig shows network configuration"
+  },
+  {
+    "ruleId": "ip-addr",
+    "techniqueId": "T1016",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "ip",
+    "services": [
+      "ssh"
+    ],
+    "description": "ip addr shows network configuration"
+  },
+  {
+    "ruleId": "netstat-net",
+    "techniqueId": "T1016",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "netstat",
+    "services": [
+      "ssh"
+    ],
+    "description": "netstat shows network connections and configuration"
+  },
+  {
+    "ruleId": "ss-net",
+    "techniqueId": "T1016",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "ss",
+    "services": [
+      "ssh"
+    ],
+    "description": "ss shows sockets and network configuration"
+  },
+  {
+    "ruleId": "arp-net",
+    "techniqueId": "T1016",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "arp",
+    "services": [
+      "ssh"
+    ],
+    "description": "arp shows neighbour entries"
+  },
+  {
+    "ruleId": "route-net",
+    "techniqueId": "T1016",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "route",
+    "services": [
+      "ssh"
+    ],
+    "description": "route shows the routing table"
+  },
+  {
+    "ruleId": "nmap-scan",
+    "techniqueId": "T1046",
+    "tactic": "Discovery",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "nmap",
+    "services": [
+      "ssh"
+    ],
+    "description": "nmap scans network services"
+  },
+  {
+    "ruleId": "wget-transfer",
+    "techniqueId": "T1105",
+    "tactic": "Command and Control",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "wget",
+    "services": [
+      "ssh"
+    ],
+    "description": "wget downloads a file from a remote host"
+  },
+  {
+    "ruleId": "curl-transfer",
+    "techniqueId": "T1105",
+    "tactic": "Command and Control",
+    "confidence": 0.9,
+    "match": "exact",
+    "pattern": "curl",
+    "services": [
+      "ssh"
+    ],
+    "description": "curl downloads a file from a remote host"
+  },
+  {
+    "ruleId": "ftp-retr-tool",
+    "techniqueId": "T1105",
+    "tactic": "Command and Control",
+    "confidence": 0.7,
+    "match": "regex",
+    "pattern": "^retr\\s+\\S+\\.(sh|py|ps1|exe|bin|pl|rb)\\b",
+    "services": [
+      "ftp"
+    ],
+    "description": "FTP download of a tool or script file"
+  },
+  {
+    "ruleId": "decode-obfuscation",
+    "techniqueId": "T1027",
+    "tactic": "Defense Evasion",
+    "confidence": 0.7,
+    "match": "regex",
+    "pattern": "\\b(base64\\s+(-d|--decode)|xxd\\s+\\S*\\s+-r|openssl\\s+enc\\s+\\S*\\s+-d)\\b",
+    "services": [
+      "ssh"
+    ],
+    "description": "decoding a base64 or encoded payload"
+  },
+  {
+    "ruleId": "persistence",
+    "techniqueId": "T1547",
+    "tactic": "Persistence",
+    "confidence": 0.7,
+    "match": "regex",
+    "pattern": "(\\bcrontab\\b|\\bsystemctl\\s+enable\\b|>>\\s*\\S*(\\.bashrc|authorized_keys)\\b)",
+    "services": [
+      "ssh"
+    ],
+    "description": "crontab edit, bashrc append, authorized_keys append, or systemctl enable"
+  },
+  {
+    "ruleId": "http-sqli",
+    "techniqueId": "T1190",
+    "tactic": "Initial Access",
+    "confidence": 0.7,
+    "match": "regex",
+    "pattern": "(union\\s+select|or\\s+1\\s*=\\s*1|\\'\\s*or\\s+1=1|\"\\s*or\\s+1=1)",
+    "services": [
+      "http"
+    ],
+    "description": "SQL injection pattern in an HTTP request"
+  },
+  {
+    "ruleId": "http-traversal",
+    "techniqueId": "T1190",
+    "tactic": "Initial Access",
+    "confidence": 0.7,
+    "match": "regex",
+    "pattern": "(\\.\\./|\\.\\\\)",
+    "services": [
+      "http"
+    ],
+    "description": "path traversal pattern in an HTTP request, after percent decoding"
+  },
+  {
+    "ruleId": "http-login-app",
+    "techniqueId": "T1190",
+    "tactic": "Initial Access",
+    "confidence": 0.5,
+    "match": "regex",
+    "pattern": "^(/wp-login\\.php|/phpmyadmin[^\\s]*|/admin[^\\s]*)\\s+(post\\b|.*\\b(password|user_login|username|login)\\b)",
+    "services": [
+      "http"
+    ],
+    "description": "login attempt against a public-facing app path"
+  }
+]

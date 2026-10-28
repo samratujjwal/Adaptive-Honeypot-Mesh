@@ -864,3 +864,33 @@ test("http: attacker credentials never appear in operational logs", async () => 
     rmSync(made.dir, { recursive: true, force: true });
   }
 });
+
+
+test("http: 404 route event preserves query and rawTarget", async () => {
+  const made = await startServer({});
+  try {
+    await httpRequest(made.port, { path: "/nope?q=hello%20world" });
+    const found = await waitForEvents(made.eventsDir, (e) => e.eventType === "http_request");
+    const reqEvent = found[0];
+    assert.equal(reqEvent.payload.query, "q=hello%20world");
+    assert.equal(reqEvent.payload.rawTarget, "/nope?q=hello%20world");
+    assert.equal(reqEvent.payload.matchedRoute, "not_found");
+  } finally {
+    await made.honeypot.close();
+    await made.sink.close();
+  }
+});
+
+test("http: normalized payload.path is unchanged by the fix", async () => {
+  const made = await startServer({});
+  try {
+    await httpRequest(made.port, { path: "/../../etc/passwd" });
+    const found = await waitForEvents(made.eventsDir, (e) => e.eventType === "http_request");
+    const reqEvent = found[0];
+    assert.equal(reqEvent.payload.path, "/etc/passwd");
+    assert.equal(reqEvent.payload.rawTarget, "/../../etc/passwd");
+  } finally {
+    await made.honeypot.close();
+    await made.sink.close();
+  }
+});

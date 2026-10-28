@@ -620,3 +620,72 @@ test("ssh: Last login day of month is space padded like Linux", () => {
   assert.equal(formatted, "Mon Sep  2 09:06:04 2024");
   assert.ok(!formatted.includes("Sep 02"));
 });
+
+test("processor: an ssh command event gets a mitre field and passes fake-ES bulk validation against the real events template", async () => {
+  const { buildTemplates } = await import("../../../packages/search/src/templates.js");
+  const { validateDocument } = await import("../../../packages/search/src/validate.js");
+  const { eventsTemplate } = buildTemplates("honeypot");
+  const cfg = baseConfig({});
+  const seen = [];
+  const indexer = {
+    async index(docs) {
+      for (const doc of docs) {
+        if (doc.index.startsWith("honeypot-events-")) {
+          const result = validateDocument(doc.body, eventsTemplate.template.mappings);
+          seen.push(result);
+        }
+      }
+      return { retries: 0, rejected: [], remaining: [] };
+    },
+    close: async () => {},
+  };
+  const processor = createProcessor({ config: cfg, logger: silentLogger, indexer });
+  const event = makeEvent({ eventType: "command", payload: { command: "cat /etc/passwd" } });
+  await processor.processBatch([{ value: Buffer.from(JSON.stringify(event), "utf8"), offset: "0", topic: "honeypot.events", partition: 0 }]);
+  assert.ok(seen.length >= 1);
+  assert.ok(seen.every((r) => r.ok), JSON.stringify(seen));
+  assert.ok(processor.stats().mitreClassified >= 1);
+  await processor.close();
+});
+
+test("processor: an event with no match gets mitre = []", async () => {
+  const cfg = baseConfig({});
+  const bodies = [];
+  const indexer = {
+    async index(docs) { for (const doc of docs) bodies.push(doc.body); return { retries: 0, rejected: [], remaining: [] }; },
+    close: async () => {},
+  };
+  const processor = createProcessor({ config: cfg, logger: silentLogger, indexer });
+  const event = makeEvent({ eventType: "command", payload: { command: "pwd" } });
+  await processor.processBatch([{ value: Buffer.from(JSON.stringify(event), "utf8"), offset: "0", topic: "honeypot.events", partition: 0 }]);
+  const eventDoc = bodies.find((b) => b.eventType === "command");
+  assert.deepEqual(eventDoc.mitre, []);
+  await processor.close();
+});
+
+test("processor: HTTP event with rawTarget gets T1190 and passes fake-ES bulk validation against the real events template", async () => {
+  const { buildTemplates } = await import("../../../packages/search/src/templates.js");
+  const { validateDocument } = await import("../../../packages/search/src/validate.js");
+  const { eventsTemplate } = buildTemplates("honeypot");
+  const cfg = baseConfig({});
+  const bodies = [];
+  const indexer = {
+    async index(docs) {
+      for (const doc of docs) {
+        if (doc.index.startsWith("honeypot-events-")) {
+          const result = validateDocument(doc.body, eventsTemplate.template.mappings);
+          assert.deepEqual(result.errors, [], result.errors.join("; "));
+          bodies.push(doc.body);
+        }
+      }
+      return { retries: 0, rejected: [], remaining: [] };
+    },
+    close: async () => {},
+  };
+  const processor = createProcessor({ config: cfg, logger: silentLogger, indexer });
+  const event = makeEvent({ honeypot: { service: "http", nodeId: "node-01" }, eventType: "http_request", payload: { method: "GET", path: "/etc/passwd", query: "", bodyPreview: "", rawTarget: "/../../etc/passwd" } });
+  await processor.processBatch([{ value: Buffer.from(JSON.stringify(event), "utf8"), offset: "0", topic: "honeypot.events", partition: 0 }]);
+  const doc = bodies.find((b) => b.eventType === "http_request");
+  assert.ok(doc.mitre.some((item) => item.techniqueId === "T1190"));
+  await processor.close();
+});

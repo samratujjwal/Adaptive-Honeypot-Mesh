@@ -108,3 +108,26 @@ which stops growing at PROCESSOR_DEAD_LETTER_MAX_BYTES.
 Known limitation: a crash between the Elasticsearch write and the
 offset commit can re-deliver messages; events stay exact (same _id),
 session counters are protected by the last-200 id window only.
+
+## MITRE ATT&CK (Day 11, rules only)
+
+A deterministic, local, rules-only classifier maps an attacker command,
+HTTP request, FTP command, or auth event to MITRE ATT&CK technique IDs
+in the processor, after Kafka and before Elasticsearch. It uses only
+the local rules file (packages/mitre/src/rules.json): no LLM, no
+profiling, no brute-force verdict, no session aggregation.
+
+Mapped techniques include Discovery (T1033, T1082, T1083, T1087, T1057,
+T1016, T1046), Credential Access (T1003, T1552.001, T1110.001 at 0.4),
+Initial Access (T1190, T1078 at 0.4), Command and Control (T1105),
+Defense Evasion (T1027), and Persistence (T1547). A single
+auth_attempt is only a 0.4 hint, never a brute-force verdict; a
+honeytoken viewed event is not mapped, only used is (T1552.001 at 0.9).
+
+Run it manually: `npm run mitre:check -- "cat /etc/passwd"` or
+`node tools/mitre-check.js "wget http://example.com/x.sh"`.
+
+HTTP events now also carry payload.rawTarget: the original request.url
+before URL normalization, capped at 2048 chars, so the classifier can
+see ../ and percent-encoded SQLi that normalization and encoding would
+otherwise hide. payload.path stays normalized, exactly as before.

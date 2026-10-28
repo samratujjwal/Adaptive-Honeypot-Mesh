@@ -2,6 +2,7 @@ import { validateEvent } from "../../../packages/shared/src/event.js";
 import { enrichEvent } from "../../../packages/enrich/src/enrich.js";
 import { eventsIndexName } from "../../../packages/search/src/index-name.js";
 import { createSessionAggregator } from "./sessions.js";
+import { classify } from "../../../packages/mitre/src/classify.js";
 import { createDeadLetter } from "./dead-letter.js";
 
 /**
@@ -27,7 +28,7 @@ export function createProcessor(options) {
     idleMs: config.PROCESSOR_SESSION_IDLE_MS,
     loadExisting: options.loadExisting,
   });
-  const stats = { consumed: 0, indexed: 0, rejectedByEs: 0, deadLettered: 0, sessionsUpdated: 0, esRetries: 0, sessionsIndexed: 0, lastError: null };
+  const stats = { consumed: 0, indexed: 0, rejectedByEs: 0, deadLettered: 0, sessionsUpdated: 0, esRetries: 0, sessionsIndexed: 0, mitreClassified: 0, lastError: null };
   let statsTimer = null;
 
   function deadLetterEntry(message, reason, raw) {
@@ -71,6 +72,9 @@ export function createProcessor(options) {
       const session = await aggregator.apply(event, enrich);
       if (session) changedSessions.set(session.sessionId, session);
       const body = { ...event };
+      const mitreFull = classify(event);
+      body.mitre = mitreFull.map((item) => ({ techniqueId: item.techniqueId, tactic: item.tactic, confidence: item.confidence }));
+      if (mitreFull.length > 0) stats.mitreClassified += 1;
       body.enrich = { ipClass: enrich.ipClass, geo: enrich.geo };
       body.ingestedAt = new Date().toISOString();
       if (enrich.ipClass === "invalid") {
