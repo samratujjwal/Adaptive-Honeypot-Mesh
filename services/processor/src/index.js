@@ -9,6 +9,8 @@ import { createConsumer } from "./consumer.js";
 import { ensureTemplates } from "../../../packages/search/src/setup.js";
 import { waitForStartup, createStartupChecks } from "./startup.js";
 import { createKafkaClient } from "../../../packages/bus/src/kafka-client.js";
+import { createLlmEnhancer } from "../../../packages/profile/src/llm-classify.js";
+import { createGeminiClient } from "../../../packages/llm/src/gemini.js";
 
 /**
  * Start the processor. Runs itself only when executed directly.
@@ -28,7 +30,18 @@ export async function start(deps) {
   const es = (deps && deps.es) || createEsClient({ config: cfg, logger: log });
   const indexer = (deps && deps.indexer) || createBulkIndexer({ es, config: cfg, logger: log });
   const geoip = (deps && deps.geoip) || createGeoip({ enabled: cfg.GEOIP_ENABLED });
-  const processor = createProcessor({ config: cfg, logger: log, geoip, indexer });
+  let enhanceProfile = (deps && deps.enhanceProfile) || undefined;
+  if (!enhanceProfile && cfg.LLM_MODE === "real") {
+    try {
+      const geminiClient = (deps && deps.geminiClient) || createGeminiClient({ apiKey: cfg.GEMINI_API_KEY, timeoutMs: cfg.LLM_TIMEOUT_MS, temperature: cfg.LLM_TEMPERATURE, thinkingBudget: cfg.GEMINI_THINKING_BUDGET, maxOutputTokens: cfg.LLM_MAX_OUTPUT_TOKENS, logger: log });
+      const factory = (deps && deps.enhancerFactory) || createLlmEnhancer;
+      enhanceProfile = factory({ config: cfg, geminiClient, logger: log });
+    } catch (error) {
+      try { log.warn({ code: error && error.code ? String(error.code) : "enhancer_failed" }, "Profile enhancer failed, using rules only"); } catch {}
+      enhanceProfile = undefined;
+    }
+  }
+  const processor = createProcessor({ config: cfg, logger: log, geoip, indexer, enhanceProfile });
   const kafkaClient = (deps && deps.kafkaClient) || createKafkaClient({ config: cfg, logger: log });
   const waitFn = (deps && deps.waitForStartupFn) || waitForStartup;
   const ensureFn = (deps && deps.ensureTemplatesFn) || ensureTemplates;

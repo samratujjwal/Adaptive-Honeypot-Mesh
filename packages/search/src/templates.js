@@ -69,5 +69,60 @@ export function buildTemplates(prefix) {
       },
     },
   };
-  return { eventsTemplate, sessionsTemplate };
+  const profilesTemplate = {
+    index_patterns: [`${prefix}-profiles`],
+    template: {
+      settings,
+      mappings: {
+        dynamic: "strict",
+        properties: {
+          sessionId: { type: "keyword" },
+          service: { type: "keyword" },
+          nodeId: { type: "keyword" },
+          sourceIp: { type: "keyword" },
+          firstSeen: { type: "date" },
+          lastSeen: { type: "date" },
+          durationMs: { type: "integer" },
+          closed: { type: "boolean" },
+          eventCount: { type: "integer" },
+          commandCount: { type: "integer" },
+          authAttempts: { type: "integer" },
+          authSuccess: { type: "integer" },
+          commandNames: { type: "keyword" },
+          mitreTechniqueIds: { type: "keyword" },
+          mitreTactics: { type: "keyword" },
+          classification: { properties: { actorType: { type: "keyword" }, skillLevel: { type: "keyword" }, intent: { type: "keyword" }, tools: { type: "keyword" }, confidence: { type: "float" } } },
+          llm: { properties: { used: { type: "boolean" }, cached: { type: "boolean" }, fallback: { type: "boolean" }, model: { type: "keyword" }, latencyMs: { type: "integer" } } },
+          updatedAt: { type: "date" },
+        },
+      },
+    },
+  };
+  const attackersTemplate = {
+    index_patterns: [`${prefix}-attackers`],
+    template: {
+      settings,
+      mappings: {
+        dynamic: "strict",
+        properties: {
+          attackerId: { type: "keyword" },
+          sourceIp: { type: "keyword" },
+          firstSeen: { type: "date" },
+          lastSeen: { type: "date" },
+          sessionCount: { type: "integer" },
+          serviceCount: { type: "integer" },
+          services: { type: "keyword" },
+          sessionIds: { type: "keyword" },
+          mitreTechniqueIds: { type: "keyword" },
+          mitreTactics: { type: "keyword" },
+          tools: { type: "keyword" },
+          commandNames: { type: "keyword" },
+          classification: { properties: { actorType: { type: "keyword" }, skillLevel: { type: "keyword" }, intent: { type: "keyword" }, confidence: { type: "float" }, llmIntentMismatch: { type: "boolean" } } },
+          strategy: { properties: { name: { type: "keyword" }, reason: { type: "keyword" }, crossService: { type: "boolean" } } },
+          updatedAt: { type: "date" },
+        },
+      },
+    },
+  };
+  return { eventsTemplate, sessionsTemplate, profilesTemplate, attackersTemplate };
 }

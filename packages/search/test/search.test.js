@@ -190,3 +190,31 @@ test("tools: mitre-check prints techniqueIds as JSON", async () => {
   assert.equal(parsed.input, "cat /etc/passwd");
   assert.ok(parsed.mitre.some((item) => item.techniqueId === "T1087"));
 });
+
+test("search: every profile document field exists in the strict profiles mapping", async () => {
+  const { buildTemplates } = await import("../src/templates.js");
+  const { validateDocument } = await import("../src/validate.js");
+  const { profilesTemplate } = buildTemplates("honeypot");
+  const { classifyProfile } = await import("../../../packages/profile/src/classify.js");
+  const profile = classifyProfile({ sessionId: "sess-1", service: "ssh", nodeId: "node-01", sourceIp: "127.0.0.1", firstSeen: "2026-10-28T10:00:00Z", lastSeen: "2026-10-28T10:01:00Z", durationMs: 60000, closed: true, eventCount: 5, commandCount: 1, authAttempts: 1, authSuccess: 1, commands: ["whoami"], mitreTechniqueIds: ["T1033"], mitreTactics: ["Discovery"] });
+  const result = validateDocument(profile, profilesTemplate.template.mappings);
+  assert.deepEqual(result.errors, [], result.errors.join("; "));
+  assert.equal(result.ok, true);
+});
+
+test("search: setup ensures profiles template and index idempotently", async () => {
+  const { ensureTemplates } = await import("../src/setup.js");
+  const calls = [];
+  const es = {
+    indices: {
+      putIndexTemplate: async (args) => { calls.push(["put", args.name]); },
+      exists: async ({ index }) => index === "honeypot-sessions",
+      create: async (args) => { calls.push(["create", args.index]); },
+    },
+  };
+  const result = await ensureTemplates(es, { prefix: "honeypot" });
+  assert.equal(result.profilesTemplate, true);
+  assert.equal(result.profilesIndex, true);
+  assert.ok(calls.some(([op, name]) => op === "put" && name === "honeypot-profiles"));
+  assert.ok(calls.some(([op, name]) => op === "create" && name === "honeypot-profiles"));
+});

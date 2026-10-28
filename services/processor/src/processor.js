@@ -4,6 +4,8 @@ import { eventsIndexName } from "../../../packages/search/src/index-name.js";
 import { createSessionAggregator } from "./sessions.js";
 import { classify } from "../../../packages/mitre/src/classify.js";
 import { createDeadLetter } from "./dead-letter.js";
+import { classifyProfile } from "../../../packages/profile/src/classify.js";
+import { buildAttackerProfile, mergeAttacker, validateAttacker } from "../../../packages/adaptive/src/index.js";
 
 /**
  * Create the processor: parse, validate, enrich, aggregate, index.
@@ -28,7 +30,8 @@ export function createProcessor(options) {
     idleMs: config.PROCESSOR_SESSION_IDLE_MS,
     loadExisting: options.loadExisting,
   });
-  const stats = { consumed: 0, indexed: 0, rejectedByEs: 0, deadLettered: 0, sessionsUpdated: 0, esRetries: 0, sessionsIndexed: 0, mitreClassified: 0, lastError: null };
+  const stats = { consumed: 0, indexed: 0, rejectedByEs: 0, deadLettered: 0, sessionsUpdated: 0, esRetries: 0, sessionsIndexed: 0, mitreClassified: 0, profilesWritten: 0, profileLlmUsed: 0, profileLlmCached: 0, profileLlmFallback: 0, profileErrors: 0, attackersWritten: 0, attackerErrors: 0, lastError: null };
+  const attackerProfilesByIp = new Map();
   let statsTimer = null;
 
   function deadLetterEntry(message, reason, raw) {
@@ -69,10 +72,12 @@ export function createProcessor(options) {
       const event = result.data;
       validMessages.push(message);
       const enrich = await enrichEvent(event, { geoip: options.geoip });
-      const session = await aggregator.apply(event, enrich);
+      const mitreFullEarly = classify(event);
+      const eventWithMitre = { ...event, mitre: mitreFullEarly.map((item) => ({ techniqueId: item.techniqueId, tactic: item.tactic, confidence: item.confidence })) };
+      const session = await aggregator.apply(eventWithMitre, enrich);
       if (session) changedSessions.set(session.sessionId, session);
       const body = { ...event };
-      const mitreFull = classify(event);
+      const mitreFull = mitreFullEarly;
       body.mitre = mitreFull.map((item) => ({ techniqueId: item.techniqueId, tactic: item.tactic, confidence: item.confidence }));
       if (mitreFull.length > 0) stats.mitreClassified += 1;
       body.enrich = { ipClass: enrich.ipClass, geo: enrich.geo };
@@ -125,6 +130,84 @@ export function createProcessor(options) {
       const rejectedSessions = outcome.rejected ? outcome.rejected.filter((f) => f.doc.index === sessionIndex).length : 0;
       stats.sessionsIndexed += sessionDocs - rejectedSessions;
       stats.sessionsUpdated += changedSessions.size;
+    }
+    // Profile writing: best-effort, on close or eviction only, never blocks offsets.
+    try {
+      const profiled = options._profiledIds || (options._profiledIds = new Set());
+      const toProfile = [];
+      for (const session of changedSessions.values()) {
+        if (session.closed && !profiled.has(session.sessionId)) toProfile.push({ session, signals: aggregator.getSignals ? aggregator.getSignals(session.sessionId) : null });
+      }
+      if (aggregator.takeEvicted) {
+        for (const evicted of aggregator.takeEvicted()) {
+          if (!profiled.has(evicted.session.sessionId)) toProfile.push(evicted);
+        }
+      }
+      for (const item of toProfile) {
+        try {
+          const session = item.session;
+          const signals = item.signals || {};
+          const input = {
+            sessionId: session.sessionId, service: session.service, nodeId: session.nodeId, sourceIp: session.sourceIp,
+            firstSeen: session.firstSeen, lastSeen: session.lastSeen, durationMs: session.durationMs, closed: session.closed,
+            eventCount: session.eventCount, commandCount: session.commandCount, authAttempts: session.authAttempts, authSuccess: session.authSuccess,
+            commands: session.commands, mitreTechniqueIds: signals.mitreTechniqueIds || [], mitreTactics: signals.mitreTactics || [],
+            userAgents: signals.userAgents || [], fileTransferOut: Boolean(signals.fileTransferOut), fileTransferOutSensitive: Boolean(signals.fileTransferOutSensitive), transferService: session.service,
+            totalTypingMs: signals.totalTypingMs || 0, totalKeystrokes: signals.totalKeystrokes || 0, backspaceCount: signals.backspaceCount || 0,
+            httpLoginAttempts: signals.httpLoginAttempts || 0,
+          };
+          const rulesProfile = classifyProfile(input);
+          const rulesIntent = rulesProfile.classification.intent;
+          let profile = rulesProfile;
+          if (options.enhanceProfile) {
+            profile = await options.enhanceProfile(profile, input);
+          }
+          profiled.add(session.sessionId);
+          if (indexer) {
+            const outcome = await indexer.index([{ index: `${config.ES_INDEX_PREFIX}-profiles`, id: session.sessionId, body: profile }]);
+            if (outcome.remaining && outcome.remaining.length > 0) throw new Error("profile indexer closed");
+            if (outcome.rejected && outcome.rejected.length > 0) throw new Error("profile rejected");
+            stats.profilesWritten += 1;
+            if (profile.llm && profile.llm.used) stats.profileLlmUsed += 1;
+            if (profile.llm && profile.llm.cached) stats.profileLlmCached += 1;
+            if (profile.llm && profile.llm.fallback) stats.profileLlmFallback += 1;
+          } else {
+            stats.profilesWritten += 1;
+          }
+          try {
+            const correlationProfile = { ...profile, rulesIntent };
+            const ip = profile.sourceIp;
+            const existing = attackerProfilesByIp.get(ip) || [];
+            if (!existing.some((entry) => entry.sessionId === profile.sessionId)) existing.push(correlationProfile);
+            attackerProfilesByIp.set(ip, existing);
+            let attacker = buildAttackerProfile(existing);
+            if (options.getAttackerFn) {
+              try {
+                const stored = await options.getAttackerFn(ip);
+                if (stored) attacker = mergeAttacker(stored, attacker);
+              } catch {
+                try { logger.warn({ code: "ATTACKER_READ" }, "Attacker read failed, using in-memory profiles only"); } catch {}
+              }
+            }
+            if (!validateAttacker(attacker)) throw new Error("attacker validation failed");
+            if (options.indexAttackerFn) {
+              await options.indexAttackerFn(attacker);
+            } else if (indexer) {
+              const attackerOutcome = await indexer.index([{ index: `${config.ES_INDEX_PREFIX}-attackers`, id: attacker.attackerId, body: attacker }]);
+              if (attackerOutcome.remaining && attackerOutcome.remaining.length > 0) throw new Error("attacker indexer closed");
+              if (attackerOutcome.rejected && attackerOutcome.rejected.length > 0) throw new Error("attacker rejected");
+            }
+            stats.attackersWritten += 1;
+          } catch {
+            stats.attackerErrors += 1;
+            try { logger.warn({ code: "ATTACKER_WRITE" }, "Attacker update failed"); } catch {}
+          }
+        } catch {
+          stats.profileErrors += 1;
+        }
+      }
+    } catch {
+      stats.profileErrors += 1;
     }
     resolved.push(...validMessages);
     return { resolved, docs, stats: { ...stats } };

@@ -445,7 +445,7 @@ test("tools: es-setup creates templates idempotently", async () => {
   const second = await setupEs({ config: cfg, es });
   assert.equal(first.eventsTemplate, true);
   assert.equal(second.eventsTemplate, true);
-  assert.equal(templateCalls, 4);
+  assert.equal(templateCalls, 8);
 });
 test("tools: es-summary prints counts and never prints passwords or commands", async () => {
   const cfg = baseConfig({});
@@ -688,4 +688,228 @@ test("processor: HTTP event with rawTarget gets T1190 and passes fake-ES bulk va
   const doc = bodies.find((b) => b.eventType === "http_request");
   assert.ok(doc.mitre.some((item) => item.techniqueId === "T1190"));
   await processor.close();
+});
+
+test("processor: closed session writes a profile doc with _id=sessionId and passes fake-ES bulk validation against the real profiles template", async () => {
+  const { buildTemplates } = await import("../../../packages/search/src/templates.js");
+  const { validateDocument } = await import("../../../packages/search/src/validate.js");
+  const { profilesTemplate } = buildTemplates("honeypot");
+  const cfg = baseConfig({});
+  const profiles = [];
+  const indexer = {
+    async index(docs) {
+      for (const doc of docs) {
+        if (doc.index === "honeypot-profiles") {
+          const result = validateDocument(doc.body, profilesTemplate.template.mappings);
+          assert.deepEqual(result.errors, [], result.errors.join("; "));
+          profiles.push(doc);
+        }
+      }
+      return { retries: 0, rejected: [], remaining: [] };
+    },
+    close: async () => {},
+  };
+  const processor = createProcessor({ config: cfg, logger: silentLogger, indexer });
+  const open = makeEvent({ eventType: "connection_open", payload: {} });
+  const closeEv = makeEvent({ eventType: "connection_close", payload: { reason: "client_quit" } });
+  await processor.processBatch([
+    { value: Buffer.from(JSON.stringify(open), "utf8"), offset: "0", topic: "honeypot.events", partition: 0 },
+    { value: Buffer.from(JSON.stringify(closeEv), "utf8"), offset: "1", topic: "honeypot.events", partition: 0 },
+  ]);
+  assert.equal(profiles.length, 1);
+  assert.equal(profiles[0].id, "test-session-12345678");
+  assert.ok(processor.stats().profilesWritten >= 1);
+  await processor.close();
+});
+
+test("processor: open session does not write a profile yet", async () => {
+  const cfg = baseConfig({});
+  const profiles = [];
+  const indexer = {
+    async index(docs) { for (const doc of docs) if (doc.index === "honeypot-profiles") profiles.push(doc); return { retries: 0, rejected: [], remaining: [] }; },
+    close: async () => {},
+  };
+  const processor = createProcessor({ config: cfg, logger: silentLogger, indexer });
+  const open = makeEvent({ eventType: "connection_open", payload: {} });
+  await processor.processBatch([{ value: Buffer.from(JSON.stringify(open), "utf8"), offset: "0", topic: "honeypot.events", partition: 0 }]);
+  assert.equal(profiles.length, 0);
+  await processor.close();
+});
+
+test("processor: evicted session writes a profile, and re-writing the same sessionId overwrites, never duplicates", async () => {
+  const cfg = loadConfig({ BIND_HOST: "127.0.0.1", NODE_ID: "node-01", EVENT_DIR: "/tmp", PROCESSOR_DEAD_LETTER_FILE: "/tmp/dead.jsonl", PROCESSOR_SESSION_IDLE_MS: 1 });
+  const profiles = [];
+  const indexer = {
+    async index(docs) { for (const doc of docs) if (doc.index === "honeypot-profiles") profiles.push(doc); return { retries: 0, rejected: [], remaining: [] }; },
+    close: async () => {},
+  };
+  const processor = createProcessor({ config: cfg, logger: silentLogger, indexer });
+  const open = makeEvent({ eventType: "connection_open", payload: {} });
+  await processor.processBatch([{ value: Buffer.from(JSON.stringify(open), "utf8"), offset: "0", topic: "honeypot.events", partition: 0 }]);
+  // Trigger eviction by advancing time: apply a second session, evictIdle runs on apply
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const open2 = makeEvent({ sessionId: "other-session-12345678", eventType: "connection_open", payload: {} });
+  await processor.processBatch([{ value: Buffer.from(JSON.stringify(open2), "utf8"), offset: "1", topic: "honeypot.events", partition: 0 }]);
+  const firstIds = profiles.filter((p) => p.id === "test-session-12345678");
+  assert.ok(firstIds.length >= 1);
+  const ids = profiles.map((p) => p.id);
+  assert.equal(new Set(ids).size, ids.length, "duplicate profile doc ids");
+  await processor.close();
+});
+
+test("processor: profile write failure does not block event indexing, profileErrors increments, processor continues", async () => {
+  const cfg = baseConfig({});
+  let eventDocs = 0;
+  const indexer = {
+    async index(docs) {
+      for (const doc of docs) {
+        if (doc.index.startsWith("honeypot-events-")) eventDocs += 1;
+        if (doc.index === "honeypot-profiles") throw new Error("profile boom");
+      }
+      return { retries: 0, rejected: [], remaining: [] };
+    },
+    close: async () => {},
+  };
+  const processor = createProcessor({ config: cfg, logger: silentLogger, indexer });
+  const open = makeEvent({ eventType: "connection_open", payload: {} });
+  const closeEv = makeEvent({ eventType: "connection_close", payload: { reason: "client_quit" } });
+  const outcome = await processor.processBatch([
+    { value: Buffer.from(JSON.stringify(open), "utf8"), offset: "0", topic: "honeypot.events", partition: 0 },
+    { value: Buffer.from(JSON.stringify(closeEv), "utf8"), offset: "1", topic: "honeypot.events", partition: 0 },
+  ]);
+  assert.ok(eventDocs >= 2);
+  assert.ok(processor.stats().profileErrors >= 1);
+  assert.equal(outcome.resolved.length, 2);
+  await processor.close();
+});
+
+test("fix: real-mode startup wires enhancer, ambiguous closed session gets llm.used=true with a fake LLM client, no real network", async () => {
+  const { start } = await import("../src/index.js");
+  const cfg = loadConfig({ BIND_HOST: "127.0.0.1", NODE_ID: "node-01", EVENT_DIR: "/tmp", PROCESSOR_DEAD_LETTER_FILE: "/tmp/dead.jsonl", LLM_MODE: "real", GEMINI_API_KEY: "test-fake-key" });
+  const profiles = [];
+  const fakeEs = { info: async () => ({}), indices: { putIndexTemplate: async () => ({}), exists: async () => true, create: async () => ({}) }, bulk: async () => ({ body: { items: [] } }) };
+  const fakeKafkaClient = { admin: () => ({ connect: async () => {}, listTopics: async () => [], disconnect: async () => {} }), consumer: () => ({ connect: async () => {}, subscribe: async () => {}, run: async () => {}, disconnect: async () => {} }) };
+  const fakeIndexer = {
+    async index(docs) { for (const doc of docs) if (doc.index === "honeypot-profiles") profiles.push(doc.body); return { retries: 0, rejected: [], remaining: [] }; },
+    close: async () => {},
+  };
+  const fakeGemini = { generate: async () => ({ ok: true, text: JSON.stringify({ actorType: "bot", skillLevel: "intermediate", intent: "recon", tools: ["nmap"], confidence: 0.8 }), attempt: { model: "fake-model" } }) };
+  const result = await start({
+    config: cfg, logger: silentLogger, es: fakeEs, kafkaClient: fakeKafkaClient, indexer: fakeIndexer,
+    geoip: { lookup: async () => null }, noStatsTimer: true, waitForStartupFn: async () => {}, ensureTemplatesFn: async () => {},
+    geminiClient: fakeGemini,
+  });
+  const open = makeEvent({ eventType: "connection_open", payload: {} });
+  const closeEv = makeEvent({ eventType: "connection_close", payload: { reason: "client_quit" } });
+  await result.processor.processBatch([
+    { value: Buffer.from(JSON.stringify(open), "utf8"), offset: "0", topic: "honeypot.events", partition: 0 },
+    { value: Buffer.from(JSON.stringify(closeEv), "utf8"), offset: "1", topic: "honeypot.events", partition: 0 },
+  ]);
+  assert.ok(profiles.length >= 1);
+  assert.equal(profiles[0].llm.used, true);
+  assert.ok(result.processor.stats().profileLlmUsed >= 1);
+  await result.close();
+});
+
+test("fix: mock-mode startup does not call LLM", async () => {
+  const { start } = await import("../src/index.js");
+  const cfg = loadConfig({ BIND_HOST: "127.0.0.1", NODE_ID: "node-01", EVENT_DIR: "/tmp", PROCESSOR_DEAD_LETTER_FILE: "/tmp/dead.jsonl", LLM_MODE: "mock" });
+  const profiles = [];
+  const fakeEs = { info: async () => ({}), indices: { putIndexTemplate: async () => ({}), exists: async () => true, create: async () => ({}) } };
+  const fakeKafkaClient = { admin: () => ({ connect: async () => {}, listTopics: async () => [], disconnect: async () => {} }), consumer: () => ({ connect: async () => {}, subscribe: async () => {}, run: async () => {}, disconnect: async () => {} }) };
+  const fakeIndexer = {
+    async index(docs) { for (const doc of docs) if (doc.index === "honeypot-profiles") profiles.push(doc.body); return { retries: 0, rejected: [], remaining: [] }; },
+    close: async () => {},
+  };
+  let called = false;
+  const fakeGemini = { generate: async () => { called = true; return { ok: true, text: "{}" }; } };
+  const result = await start({
+    config: cfg, logger: silentLogger, es: fakeEs, kafkaClient: fakeKafkaClient, indexer: fakeIndexer,
+    geoip: { lookup: async () => null }, noStatsTimer: true, waitForStartupFn: async () => {}, ensureTemplatesFn: async () => {},
+    geminiClient: fakeGemini,
+  });
+  const open = makeEvent({ eventType: "connection_open", payload: {} });
+  const closeEv = makeEvent({ eventType: "connection_close", payload: { reason: "client_quit" } });
+  await result.processor.processBatch([
+    { value: Buffer.from(JSON.stringify(open), "utf8"), offset: "0", topic: "honeypot.events", partition: 0 },
+    { value: Buffer.from(JSON.stringify(closeEv), "utf8"), offset: "1", topic: "honeypot.events", partition: 0 },
+  ]);
+  assert.equal(called, false);
+  assert.ok(profiles.length >= 1);
+  assert.equal(profiles[0].llm.used, false);
+  await result.close();
+});
+
+test("fix: enhancer creation failure falls back to rules, processor still runs and still indexes events and sessions", async () => {
+  const { start } = await import("../src/index.js");
+  const cfg = loadConfig({ BIND_HOST: "127.0.0.1", NODE_ID: "node-01", EVENT_DIR: "/tmp", PROCESSOR_DEAD_LETTER_FILE: "/tmp/dead.jsonl", LLM_MODE: "real", GEMINI_API_KEY: "test-fake-key" });
+  const fakeEs = { info: async () => ({}), indices: { putIndexTemplate: async () => ({}), exists: async () => true, create: async () => ({}) } };
+  const fakeKafkaClient = { admin: () => ({ connect: async () => {}, listTopics: async () => [], disconnect: async () => {} }), consumer: () => ({ connect: async () => {}, subscribe: async () => {}, run: async () => {}, disconnect: async () => {} }) };
+  let eventDocs = 0;
+  const fakeIndexer = {
+    async index(docs) { for (const doc of docs) if (doc.index.startsWith("honeypot-events-")) eventDocs += 1; return { retries: 0, rejected: [], remaining: [] }; },
+    close: async () => {},
+  };
+  const result = await start({
+    config: cfg, logger: silentLogger, es: fakeEs, kafkaClient: fakeKafkaClient, indexer: fakeIndexer,
+    geoip: { lookup: async () => null }, noStatsTimer: true, waitForStartupFn: async () => {}, ensureTemplatesFn: async () => {},
+    enhancerFactory: () => { throw new Error("enhancer boom"); },
+  });
+  const open = makeEvent({ eventType: "connection_open", payload: {} });
+  const outcome = await result.processor.processBatch([{ value: Buffer.from(JSON.stringify(open), "utf8"), offset: "0", topic: "honeypot.events", partition: 0 }]);
+  assert.ok(eventDocs >= 1);
+  assert.equal(outcome.resolved.length, 1);
+  await result.close();
+});
+
+test("fix: profile doc still passes mapping-conformance, session doc unchanged", async () => {
+  const { buildTemplates } = await import("../../../packages/search/src/templates.js");
+  const { validateDocument } = await import("../../../packages/search/src/validate.js");
+  const { sessionsTemplate, profilesTemplate } = buildTemplates("honeypot");
+  const { classifyProfile } = await import("../../../packages/profile/src/classify.js");
+  const profile = classifyProfile({ sessionId: "sess-1", service: "ssh", nodeId: "node-01", sourceIp: "127.0.0.1", firstSeen: "2026-10-28T10:00:00Z", lastSeen: "2026-10-28T10:01:00Z", durationMs: 60000, closed: true, eventCount: 3, commandCount: 1, authAttempts: 0, authSuccess: 0, commands: ["whoami"] });
+  const profileResult = validateDocument(profile, profilesTemplate.template.mappings);
+  assert.deepEqual(profileResult.errors, [], profileResult.errors.join("; "));
+  const session = { sessionId: "sess-1", service: "ssh", nodeId: "node-01", sourceIp: "127.0.0.1", sourceIpClass: "loopback", geo: null, firstSeen: "2026-10-28T10:00:00Z", lastSeen: "2026-10-28T10:01:00Z", durationMs: 0, closed: false, closeReason: null, eventCount: 1, eventTypeCounts: {}, authAttempts: 0, authSuccess: 0, usernames: [], commandCount: 0, commands: [], httpRequestCount: 0, httpPaths: [], ftpCommandCount: 0, filesTransferred: [], llmResponses: 0, honeytokens: [], seenEventIds: [], updatedAt: "2026-10-28T10:00:00Z" };
+  const sessionResult = validateDocument(session, sessionsTemplate.template.mappings);
+  assert.deepEqual(sessionResult.errors, [], sessionResult.errors.join("; "));
+  assert.ok(!("totalTypingMs" in session) && !("fileTransferOutSensitive" in session));
+});
+
+test("adaptive: processor writes attacker on profile close, attackerErrors 0 on success, and does not crash on indexer failure", async () => {
+  const { createProcessor } = await import("../src/processor.js");
+  const { createSessionAggregator } = await import("../src/sessions.js");
+  const cfg = loadConfig({ BIND_HOST: "127.0.0.1", NODE_ID: "node-01", EVENT_DIR: "/tmp", PROCESSOR_DEAD_LETTER_FILE: "/tmp/dead.jsonl" });
+  const attackers = [];
+  const fakeIndexer = {
+    async index(docs) { for (const doc of docs) if (doc.index === "honeypot-attackers") attackers.push(doc.body); return { retries: 0, rejected: [], remaining: [] }; },
+    close: async () => {},
+  };
+  const processor = createProcessor({ config: cfg, logger: silentLogger, geoip: { lookup: async () => null }, indexer: fakeIndexer });
+  const open = makeEvent({ eventType: "connection_open", payload: {} });
+  const closeEv = makeEvent({ eventType: "connection_close", payload: { reason: "client_quit" } });
+  const outcome = await processor.processBatch([
+    { value: Buffer.from(JSON.stringify(open), "utf8"), offset: "0", topic: "honeypot.events", partition: 0 },
+    { value: Buffer.from(JSON.stringify(closeEv), "utf8"), offset: "1", topic: "honeypot.events", partition: 0 },
+  ]);
+  assert.ok(attackers.length >= 1);
+  assert.equal(attackers[0].attackerId, "127.0.0.1");
+  assert.equal(outcome.stats.attackerErrors, 0);
+  assert.ok(outcome.stats.attackersWritten >= 1);
+  assert.equal(outcome.resolved.length, 2);
+  const failingIndexer = {
+    async index(docs) {
+      for (const doc of docs) if (doc.index === "honeypot-attackers") throw new Error("attacker index boom");
+      return { retries: 0, rejected: [], remaining: [] };
+    },
+    close: async () => {},
+  };
+  const processor2 = createProcessor({ config: cfg, logger: silentLogger, geoip: { lookup: async () => null }, indexer: failingIndexer });
+  const outcome2 = await processor2.processBatch([
+    { value: Buffer.from(JSON.stringify(open), "utf8"), offset: "0", topic: "honeypot.events", partition: 0 },
+    { value: Buffer.from(JSON.stringify(closeEv), "utf8"), offset: "1", topic: "honeypot.events", partition: 0 },
+  ]);
+  assert.equal(outcome2.resolved.length, 2);
+  assert.ok(outcome2.stats.attackerErrors >= 1);
+  assert.ok(outcome2.stats.profilesWritten >= 1);
 });

@@ -55,13 +55,25 @@ export function createSessionAggregator(options = {}) {
   const loadExisting = options.loadExisting || (async () => new Map());
   const cache = new Map();
   const lastAccess = new Map();
+  const signals = new Map();
+  const evicted = [];
+
+  function signalFor(id) {
+    if (!signals.has(id)) {
+      signals.set(id, { mitreTechniqueIds: [], mitreTactics: [], userAgents: [], fileTransferOut: false, fileTransferOutSensitive: false, authTimestamps: [], totalTypingMs: 0, totalKeystrokes: 0, backspaceCount: 0, httpLoginAttempts: 0 });
+    }
+    return signals.get(id);
+  }
 
   function evictIdle() {
     const current = now();
     for (const [id, last] of lastAccess) {
       if (current - last > idleMs) {
+        const session = cache.get(id);
+        if (session) evicted.push({ session, signals: signals.get(id) || null });
         cache.delete(id);
         lastAccess.delete(id);
+        signals.delete(id);
       }
     }
     while (cache.size > cacheMax) {
@@ -71,9 +83,21 @@ export function createSessionAggregator(options = {}) {
         if (last < oldestTime) { oldestTime = last; oldestId = id; }
       }
       if (!oldestId) break;
+      const session = cache.get(oldestId);
+      if (session) evicted.push({ session, signals: signals.get(oldestId) || null });
       cache.delete(oldestId);
       lastAccess.delete(oldestId);
+      signals.delete(oldestId);
     }
+  }
+
+  function takeEvicted() {
+    const out = evicted.splice(0, evicted.length);
+    return out;
+  }
+
+  function getSignals(id) {
+    return signals.get(id) || null;
   }
 
   async function apply(event, enrich) {
@@ -93,6 +117,33 @@ export function createSessionAggregator(options = {}) {
     if (event.timestamp > session.lastSeen) session.lastSeen = event.timestamp;
     session.updatedAt = event.timestamp;
     const payload = event.payload || {};
+    const signal = signalFor(event.sessionId);
+    if (Array.isArray(event.mitre)) {
+      for (const item of event.mitre) {
+        if (item && item.techniqueId && !signal.mitreTechniqueIds.includes(item.techniqueId)) signal.mitreTechniqueIds.push(item.techniqueId);
+        if (item && item.tactic && !signal.mitreTactics.includes(item.tactic)) signal.mitreTactics.push(item.tactic);
+      }
+    }
+    if (event.eventType === "http_request" && payload.headers && typeof payload.headers["user-agent"] === "string" && payload.headers["user-agent"] && !signal.userAgents.includes(payload.headers["user-agent"])) {
+      signal.userAgents.push(payload.headers["user-agent"]);
+    }
+    if (event.eventType === "http_request" && payload.matchedRoute === "wp_login" && payload.method === "POST") signal.httpLoginAttempts += 1;
+    if (event.eventType === "file_transfer") {
+      const service = event.honeypot && event.honeypot.service ? event.honeypot.service : "";
+      const path = String(payload.savedAs || payload.path || payload.url || "");
+      const sensitive = /(\.env|wp-config|id_rsa|config\.bak|\.git\/config|notes\.txt|backup|shadow|passwd)/i.test(path);
+      if (service === "ftp" && payload.direction === "download" && sensitive) signal.fileTransferOutSensitive = true;
+      if (service === "ftp" && payload.direction === "download") signal.fileTransferOut = true;
+    }
+    if (typeof payload.typingDurationMs === "number") signal.totalTypingMs += payload.typingDurationMs;
+    else if (typeof payload.typingMs === "number") signal.totalTypingMs += payload.typingMs;
+    if (typeof payload.keystrokeCount === "number") signal.totalKeystrokes += payload.keystrokeCount;
+    else if (typeof payload.keystrokes === "number") signal.totalKeystrokes += payload.keystrokes;
+    if (payload.usedBackspace === true) signal.backspaceCount += 1;
+    else if (typeof payload.backspaceCount === "number") signal.backspaceCount += payload.backspaceCount;
+    if (event.eventType === "auth_attempt") {
+      signal.authTimestamps = [...signal.authTimestamps, event.timestamp].slice(-20);
+    }
     if (event.eventType === "auth_attempt") {
       session.authAttempts += 1;
       if (payload.success) session.authSuccess += 1;
@@ -145,5 +196,5 @@ export function createSessionAggregator(options = {}) {
     return [...cache.values()];
   }
 
-  return { apply, get, flush, evictIdle, cache };
+  return { apply, get, flush, evictIdle, cache, getSignals, takeEvicted };
 }

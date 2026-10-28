@@ -28,7 +28,7 @@ export function pacificDate(ms) {
  * @param {() => number} [options.now]
  * @param {string} [options.usageFile]
  * @param {object} [options.logger]
- * @returns {{ tryAcquire: (sessionId: string) => { ok: boolean, reason: string | null } }}
+ * @returns {{ tryAcquire: (sessionId: string) => { ok: boolean, reason: string | null }, release: (sessionId: string) => void }}
  */
 export function createLimiter({ rpm, dailyLimit, sessionLimit, now, usageFile, logger }) {
   const clock = typeof now === "function" ? now : Date.now;
@@ -86,5 +86,12 @@ export function createLimiter({ rpm, dailyLimit, sessionLimit, now, usageFile, l
     return { ok: true, reason: null };
   }
 
-  return { tryAcquire };
+  function release(sessionId) {
+    if (timestamps.length > 0) timestamps.pop();
+    if (dailyCount > 0) dailyCount -= 1;
+    const sessionCount = sessionCounts.get(sessionId) || 0;
+    if (sessionCount > 0) sessionCounts.set(sessionId, sessionCount - 1);
+  }
+
+  return { tryAcquire, release };
 }

@@ -22,7 +22,7 @@ const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.arg
 if (isMain) {
   setupEs()
     .then((result) => {
-      console.log(`Elasticsearch templates ready: events=${result.eventsTemplate}, sessions=${result.sessionsTemplate}, sessionsIndex=${result.sessionsIndex}`);
+      console.log(`Elasticsearch templates ready: events=${result.eventsTemplate}, sessions=${result.sessionsTemplate}, sessionsIndex=${result.sessionsIndex}, profiles=${result.profilesTemplate}, profilesIndex=${result.profilesIndex}, attackers=${result.attackersTemplate}, attackersIndex=${result.attackersIndex}`);
       process.exit(0);
     })
     .catch(() => {
