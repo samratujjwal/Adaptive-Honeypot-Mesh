@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MESH CONSOLE - Attacker</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="topbar">
+<div class="topbar-left">
+<span class="brand">MESH CONSOLE</span>
+<span class="node">node-01</span>
+<span class="status">Attacker profile</span>
+</div>
+<div class="topbar-right"><a href="../">Dashboard</a></div>
+</header>
+<main class="layout">
+<section class="panel wide" id="attacker-details">
+<h2>Attacker</h2>
+<p class="empty" id="attacker-error" hidden></p>
+<div>Attacker ID: <span class="mono" id="attacker-id"></span></div>
+<div>Source IP: <span class="mono" id="attacker-ip"></span></div>
+<div>First seen: <span class="mono" id="attacker-first"></span></div>
+<div>Last seen: <span class="mono" id="attacker-last"></span></div>
+<div>Session count: <span class="mono" id="attacker-sessions"></span></div>
+<div>Service count: <span class="mono" id="attacker-service-count"></span></div>
+<div>Services: <span class="mono" id="attacker-services"></span></div>
+<div>Session IDs count: <span class="mono" id="attacker-session-ids"></span></div>
+<div>Actor: <span class="mono" id="attacker-actor"></span></div>
+<div>Skill: <span class="mono" id="attacker-skill"></span></div>
+<div>Intent: <span class="mono" id="attacker-intent"></span></div>
+<div>Confidence: <span class="mono" id="attacker-confidence"></span></div>
+<div>LLM intent mismatch: <span class="mono" id="attacker-mismatch"></span></div>
+<div>Tools: <ul id="attacker-tools"></ul></div>
+<div>Commands: <ul id="attacker-commands"></ul></div>
+<div>Techniques: <ul id="attacker-techniques"></ul></div>
+</section>
+<section class="panel wide" id="strategy-section">
+<h2>Strategy</h2>
+<div>Strategy: <span class="tag" id="strategy-tag"></span></div>
+<div>Name: <span class="mono" id="strategy-name"></span></div>
+<div>Reason: <span class="mono" id="strategy-reason"></span></div>
+<div>Cross-service: <span class="mono" id="strategy-cross"></span></div>
+</section>
+<section class="panel wide" id="sessions-section">
+<h2>Sessions</h2>
+<p class="empty" id="sessions-empty">No sessions for this IP.</p>
+<table class="feed-table">
+<thead><tr><th>Session ID</th><th>Service</th><th>First seen</th><th>Last seen</th><th>Duration ms</th><th>Closed</th><th>Events</th></tr></thead>
+<tbody id="sessions-rows"></tbody>
+</table>
+</section>
+<section class="panel wide" id="profiles-section">
+<h2>Profiles</h2>
+<p class="empty" id="profiles-empty">No profiles for this IP.</p>
+<ul id="profiles-list"></ul>
+</section>
+</main>
+<script type="module" src="attacker.js"></script>
+</body>
+</html>

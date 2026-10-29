@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { isIP } from "node:net";
 import { sanitizeDoc } from "./sanitize.js";
 import { searchEvents, searchSessions, searchProfiles, searchAttackers, getAttackerByIp, getStats } from "../../../packages/search/src/reads.js";
+import { randomUUID } from "node:crypto";
 
 const INTENTS = ["recon", "credential_access", "exploitation", "persistence", "exfiltration", "unknown"];
 const SKILLS = ["beginner", "intermediate", "advanced", "unknown"];
@@ -143,6 +144,57 @@ export function createRouter({ es, prefix, logger }) {
     try {
       const { docs, total } = await searchAttackers(es, prefix, { strategy, intent, limit, offset });
       return res.json({ data: docs.map((doc) => sanitizeDoc(doc)), total, limit, offset });
+    } catch {
+      return serverError(res);
+    }
+  });
+
+  router.get("/api/attackers/:ip/stix", async (req, res) => {
+    const ip = req.params.ip;
+    if (isIP(ip) === 0) return badRequest(res, "INVALID_IP");
+    try {
+      const attacker = await getAttackerByIp(es, prefix, ip);
+      if (!attacker) return res.status(404).json({ error: { code: "NOT_FOUND" } });
+      const now = new Date().toISOString();
+      const objects = [];
+      objects.push({
+        type: "identity",
+        spec_version: "2.1",
+        id: "identity--" + randomUUID(),
+        created: now,
+        modified: now,
+        name: ip,
+        identity_class: "system",
+        description: "honeypot-observed source only. No real-world attribution is claimed.",
+      });
+      const allowed = new Set(["T1033", "T1057", "T1082", "T1083", "T1087", "T1003", "T1552.001", "T1016", "T1046", "T1105", "T1027", "T1547", "T1190", "T1110.001", "T1078"]);
+      const techniques = [...new Set(Array.isArray(attacker.mitreTechniqueIds) ? attacker.mitreTechniqueIds : [])].filter((id) => allowed.has(id));
+      for (const techniqueId of techniques) {
+        objects.push({
+          type: "attack-pattern",
+          spec_version: "2.1",
+          id: "attack-pattern--" + randomUUID(),
+          created: now,
+          modified: now,
+          name: techniqueId,
+          external_references: [{ source_name: "mitre-attack", external_id: techniqueId }],
+        });
+      }
+      const sessions = await searchSessions(es, prefix, { sourceIp: ip, limit: 20, offset: 0 });
+      for (const session of sessions.docs) {
+        objects.push({
+          type: "observed-data",
+          spec_version: "2.1",
+          id: "observed-data--" + randomUUID(),
+          created: now,
+          modified: now,
+          first_observed: session.firstSeen || now,
+          last_observed: session.lastSeen || now,
+          number_observed: typeof session.eventCount === "number" ? session.eventCount : 0,
+          object_refs: [],
+        });
+      }
+      return res.json({ type: "bundle", spec_version: "2.1", id: "bundle--" + randomUUID(), objects });
     } catch {
       return serverError(res);
     }

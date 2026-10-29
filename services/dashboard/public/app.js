@@ -393,7 +393,12 @@ function renderMap() {
   for (const entry of cards.topSourceIps) {
     const item = document.createElement("li");
     item.className = "mono";
-    item.textContent = asText(entry.ip) + ": " + asText(entry.count) + " | " + geoNote(entry.ip, entry.geo || null);
+    const text = document.createElement("span");
+    text.textContent = asText(entry.ip) + ": " + asText(entry.count) + " | " + geoNote(entry.ip, entry.geo || null) + " ";
+    const link = document.createElement("a");
+    link.textContent = "View attacker";
+    link.href = "/dashboard/attacker?ip=" + encodeURIComponent(entry.ip);
+    item.append(text, link);
     list.appendChild(item);
   }
 }

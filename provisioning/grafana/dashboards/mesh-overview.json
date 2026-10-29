@@ -1,0 +1,63 @@
+{
+  "title": "MESH OVERVIEW",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Events by service over time",
+      "type": "timeseries",
+      "datasource": { "type": "elasticsearch", "uid": "elasticsearch" },
+      "targets": [
+        {
+          "datasource": { "type": "elasticsearch", "uid": "elasticsearch" },
+          "query": "_index:honeypot-events-*",
+          "metrics": [{ "type": "count", "id": "1" }, { "type": "date_histogram", "field": "timestamp", "id": "2" }],
+          "bucketAggs": [{ "type": "terms", "field": "honeypot.service", "id": "3" }]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Sessions count",
+      "type": "stat",
+      "datasource": { "type": "elasticsearch", "uid": "elasticsearch" },
+      "targets": [
+        {
+          "datasource": { "type": "elasticsearch", "uid": "elasticsearch" },
+          "query": "_index:honeypot-sessions",
+          "metrics": [{ "type": "count", "id": "1" }]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Top techniques",
+      "type": "barchart",
+      "datasource": { "type": "elasticsearch", "uid": "elasticsearch" },
+      "targets": [
+        {
+          "datasource": { "type": "elasticsearch", "uid": "elasticsearch" },
+          "query": "_index:honeypot-profiles",
+          "metrics": [{ "type": "count", "id": "1" }],
+          "bucketAggs": [{ "type": "terms", "field": "mitreTechniqueIds", "id": "2" }]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Top source IPs",
+      "type": "table",
+      "datasource": { "type": "elasticsearch", "uid": "elasticsearch" },
+      "targets": [
+        {
+          "datasource": { "type": "elasticsearch", "uid": "elasticsearch" },
+          "query": "_index:honeypot-events-*",
+          "metrics": [{ "type": "count", "id": "1" }],
+          "bucketAggs": [{ "type": "terms", "field": "source.ip", "id": "2" }]
+        }
+      ]
+    }
+  ]
+}
