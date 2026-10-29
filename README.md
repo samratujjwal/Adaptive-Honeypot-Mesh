@@ -109,6 +109,33 @@ Known limitation: a crash between the Elasticsearch write and the
 offset commit can re-deliver messages; events stay exact (same _id),
 session counters are protected by the last-200 id window only.
 
+## SSH honeypot core (Day 2)
+SSH honeypot core with ssh2, a file event sink, and an allowlist of credential pairs, with tests 41.
+
+## Virtual filesystem and command engine (Day 3)
+Per-session virtual filesystem with root clamping, a parser with quote and chaining support, and core commands with a command-not-found fallback, with tests 74.
+
+## Gemini service (Day 4)
+Gemini service, not wired into SSH, with persona, prompt, output, cache, and limiter, with tests 119 after fix.
+
+## LLM wired into SSH (Day 5)
+LLM wired into SSH, static-first, with a deadline race and per-session filesystem for mutating commands, with tests 170.
+
+## HTTP honeypot (Day 6)
+HTTP honeypot with fake apps and an nginx persona, with tests 215.
+
+## FTP honeypot and launcher (Day 7)
+Shared virtual filesystem package, FTP honeypot on raw node net with a vsftpd persona, and a one-process launcher, with tests 265 after fix.
+
+## Persona and honeytokens (Day 8)
+Per-node persona derived from a seed, and honeytokens planted across services, with tests 310 after fix.
+
+## Kafka streaming (Day 9)
+Kafka streaming with a synchronous sink that never throws into the honeypots, with tests 343.
+
+## Processor (Day 10)
+Processor with Elasticsearch indexing, enrichment, session aggregation, and dead-letter handling, with tests 395 after fix.
+
 ## MITRE ATT&CK (Day 11, rules only)
 
 A deterministic, local, rules-only classifier maps an attacker command,
@@ -193,3 +220,6 @@ Simulator FIX: the FTP summary is now always printed, on success, connection fai
 
 ## Evaluation: dwell time, latency, and ATT&CK coverage (Day 19)
 Evaluation tools, plain Node, no new dependency. Dwell: node tools/eval-dwell.js --api-base http://127.0.0.1:3001. Latency: node tools/eval-latency.js --api-base http://127.0.0.1:3001. ATT&CK: node tools/eval-attack.js --api-base http://127.0.0.1:3001. Dwell time uses firstSeen and lastSeen only: duration seconds equals lastSeen minus firstSeen divided by 1000, sessions without a usable lastSeen are incomplete and excluded from median and mean, LLM sessions are complete sessions with an llm_response count greater than 0, static sessions are the rest, and the reported difference is LLM median minus static median. Latency uses Date.now only, 20 sequential samples per target, median, mean, min, and max over successful samples, for API /api/health, honeypot HTTP GET /wp-login.php, and honeypot SSH banner time to first banner line only, never a full login, connecting only to 127.0.0.1 and only to ports 2222, 8080, 2121, and 3001. ATT&CK coverage uses the Day 11 allowed list of 15 techniques only: observed allowed techniques divided by 15, with allowed techniques never observed listed separately and unknown techniques counted separately, never mapped to an allowed technique. All results are TBD until live measurement, full formulas and the results table are in docs/evaluation.md, and no claim is made that LLM beats static. No Grafana panel or datasource change is included, Grafana panels showing data is not claimed, Day 20 is still pending, and the project is not complete. Live measurement is Ujjwal’s job.
+
+## Spawn-free two-step demo and code freeze (Day 20)
+Spawn-free demo usage, two steps, no angle brackets. Step 1: set GF_ADMIN_USER and GF_ADMIN_PASSWORD on the host, then docker compose up -d kafka elasticsearch grafana, wait 60 to 90 seconds, check docker compose ps and ES on 127.0.0.1:9200. Step 2: npm run demo, which starts processor, honeypots, and API in-process, runs simulator basic and mixed, and prints URLs. One-command demo was changed by user decision on 2026-10-29 to a spawn-free two-step demo, because guard.js bans child processes and no guard exception was given, compose is run manually by the user, demo services are in-process only. Guard is preserved with no exception. Code freeze checklist: node tools/freeze-check.js, which checks the test list, the README day paragraphs, the final report sections, task markers, and hardcoded secrets, and exits with code 1 if any check fails. Final report location: docs/final-report.md. Code freeze is not deployment. Grafana panels No data remains a separate issue.
