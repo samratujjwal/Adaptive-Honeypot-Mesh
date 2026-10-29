@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { isIP } from "node:net";
 import { sanitizeDoc } from "./sanitize.js";
 import { searchEvents, searchSessions, searchProfiles, searchAttackers, getAttackerByIp, getStats } from "../../../packages/search/src/reads.js";
+import { createRateLimiter } from "../../../packages/shared/src/rate-limit.js";
 import { randomUUID } from "node:crypto";
 
 const INTENTS = ["recon", "credential_access", "exploitation", "persistence", "exfiltration", "unknown"];
@@ -62,9 +63,17 @@ function parseSafeString(value) {
  * @param {object} deps.logger
  * @returns {object}
  */
-export function createRouter({ es, prefix, logger }) {
+export function createRouter({ es, prefix, logger, apiRateLimiter }) {
   const router = express.Router();
   const log = logger || { error: () => {}, warn: () => {} };
+  const limiter = apiRateLimiter || createRateLimiter({});
+  router.use((req, res, next) => {
+    if (!req.path.startsWith("/api/")) return next();
+    const rawIp = req.ip || (req.socket && req.socket.remoteAddress) || "";
+    const ip = String(rawIp).replace("::ffff:", "");
+    if (!limiter.tryAcquireApi(ip).ok) return res.status(429).json({ error: { code: "RATE_LIMITED" } });
+    return next();
+  });
 
   async function health(req, res) {
     let reachable = false;

@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { config } from "../packages/shared/src/config.js";
 import { logger } from "../packages/shared/src/logger.js";
 import { createLlmService } from "../packages/llm/src/service.js";
+import { createRateLimiter } from "../packages/shared/src/rate-limit.js";
 import { createSinkFactory } from "../packages/bus/src/sink-factory.js";
 import { createKafkaClient } from "../packages/bus/src/kafka-client.js";
 import { start as startSsh } from "../services/ssh-honeypot/src/index.js";
@@ -30,9 +31,11 @@ export async function startAll(deps) {
     localFactory = true;
   }
   try { log.info({ kafka: cfg.KAFKA_ENABLED ? "enabled" : "disabled" }, `Kafka streaming: ${cfg.KAFKA_ENABLED ? "enabled" : "disabled"}`); } catch {}
-  const ssh = await startSsh({ config: cfg, logger: log, llmService, sinkFactory: factory });
-  const http = await startHttp({ config: cfg, logger: log, llmService, sinkFactory: factory });
-  const ftp = await startFtp({ config: cfg, logger: log, sinkFactory: factory });
+  const rateLimiter = (deps && deps.rateLimiter) || createRateLimiter({});
+  const personaNow = (deps && deps.personaNow !== undefined) ? deps.personaNow : Date.now();
+  const ssh = await startSsh({ config: cfg, logger: log, llmService, sinkFactory: factory, rateLimiter, personaNow });
+  const http = await startHttp({ config: cfg, logger: log, llmService, sinkFactory: factory, rateLimiter, personaNow });
+  const ftp = await startFtp({ config: cfg, logger: log, sinkFactory: factory, rateLimiter, personaNow });
   const services = { ssh: ssh.ssh, http: http.http, ftp: ftp.ftp };
   async function close() {
     await ftp.close();

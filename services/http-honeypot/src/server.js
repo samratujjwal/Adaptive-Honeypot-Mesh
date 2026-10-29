@@ -4,6 +4,7 @@ import { logger as sharedLogger } from "../../../packages/shared/src/logger.js";
 import { toEventLlm } from "../../../packages/llm/src/service.js";
 import { loadPages } from "./pages.js";
 import { createPersona } from "../../../packages/persona/src/persona.js";
+import { createRateLimiter } from "../../../packages/shared/src/rate-limit.js";
 import { createHoneytokens } from "../../../packages/persona/src/honeytokens.js";
 import { routeRequest, nginxPageForTest } from "./router.js";
 import { createSessionStore, createTokenStore } from "./sessions.js";
@@ -56,7 +57,8 @@ export function createHttpHoneypot(options) {
   const { config, sink } = options;
   const log = options.logger || sharedLogger;
   const clock = typeof options.now === "function" ? options.now : Date.now;
-  const persona = options.persona || createPersona({ seed: config.PERSONA_SEED || "change-me-default-seed", hostname: config.HONEYPOT_HOSTNAME, domain: config.HONEYPOT_DOMAIN });
+  const persona = options.persona || createPersona({ seed: config.PERSONA_SEED || "change-me-default-seed", hostname: config.HONEYPOT_HOSTNAME, domain: config.HONEYPOT_DOMAIN, ...(options.personaNow !== undefined ? { now: options.personaNow } : {}) });
+  const rateLimiter = options.rateLimiter || createRateLimiter({ now: options.now });
   const honeytokens = options.honeytokens || createHoneytokens(persona, { enabled: config.HONEYTOKENS_ENABLED !== false });
   if (config.PERSONA_SEED === "change-me-default-seed") {
     try { log.warn("PERSONA_SEED is the default value; set your own random seed in .env"); } catch {}
@@ -118,6 +120,13 @@ export function createHttpHoneypot(options) {
     const rawUrl = req.url || "/";
     const { pathname: rawPathname, query } = parseRawPath(rawUrl);
     const isOptions = method === "OPTIONS";
+
+    if (!rateLimiter.tryAcquireService(sourceIp, "http").ok || !rateLimiter.tryAcquireGlobal(sourceIp).ok) {
+      try {
+        req.socket.destroy();
+      } catch {}
+      return;
+    }
 
     if (!checkRate(sourceIp)) {
       try {

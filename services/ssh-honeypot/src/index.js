@@ -32,7 +32,7 @@ export async function start(deps) {
   }
   const log = (deps && deps.logger) || logger;
   const llmService = (deps && deps.llmService) || createLlmService({ config: cfg, logger: log });
-  const honeypot = createSshHoneypot({ config: cfg, sink, llmService });
+  const honeypot = createSshHoneypot({ config: cfg, sink, llmService, rateLimiter: deps && deps.rateLimiter, personaNow: deps && deps.personaNow !== undefined ? deps.personaNow : Date.now() });
   await honeypot.listen(cfg.SSH_PORT, cfg.BIND_HOST);
   const address = honeypot.address();
   try {

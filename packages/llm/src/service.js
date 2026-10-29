@@ -1,5 +1,5 @@
 import { makePersona } from "./persona.js";
-import { buildSystemPrompt, buildUserMessage } from "./prompt.js";
+import { buildSystemPrompt, buildUserMessage, wrapUntrusted } from "./prompt.js";
 import { parseModelOutput } from "./output.js";
 import { createCache, isTimeDependent, makeKey, capNotes, notesDigest } from "./cache.js";
 import { createLimiter } from "./limiter.js";
@@ -142,7 +142,7 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
         }
       }
       const system = buildSystemPrompt(persona, { user, cwd });
-      const userMessage = buildUserMessage(trimmedCommand, cappedNotes);
+      const userMessage = wrapUntrusted(buildUserMessage(trimmedCommand, cappedNotes));
       const primaryAcquire = limiter.tryAcquire(sessionId);
       if (!primaryAcquire.ok) {
         return staticFinish(`rate:${primaryAcquire.reason}`);
@@ -151,7 +151,7 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
       const primaryAttempt = cleanAttempt(primary.attempt, apiKey);
       if (primaryAttempt) attempts.push(primaryAttempt);
       if (primary.ok) {
-        const parsed = parseModelOutput(primary.text, { maxChars: config.LLM_MAX_OUTPUT_CHARS });
+        const parsed = parseModelOutput(primary.text, { maxChars: config.LLM_MAX_OUTPUT_CHARS, systemPrompt: system });
         if (parsed.ok) {
           if (!timeDependent) {
             cache.set(key, { output: parsed.output, exitCode: parsed.exitCode, model: config.GEMINI_MODEL, fallback: false });
@@ -178,7 +178,7 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
       const fallbackAttempt = cleanAttempt(fallbackResult.attempt, apiKey);
       if (fallbackAttempt) attempts.push(fallbackAttempt);
       if (fallbackResult.ok) {
-        const fallbackParsed = parseModelOutput(fallbackResult.text, { maxChars: config.LLM_MAX_OUTPUT_CHARS });
+        const fallbackParsed = parseModelOutput(fallbackResult.text, { maxChars: config.LLM_MAX_OUTPUT_CHARS, systemPrompt: system });
         if (fallbackParsed.ok) {
           if (!timeDependent) {
             cache.set(key, { output: fallbackParsed.output, exitCode: fallbackParsed.exitCode, model: config.GEMINI_FALLBACK_MODEL, fallback: true });
@@ -236,7 +236,7 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
       const primary = await client.generate({ model: config.GEMINI_MODEL, system, user: userMessage, schema: HTTP_RESPONSE_SCHEMA });
       if (primary.attempt) attempts.push(cleanAttempt(primary.attempt, apiKey));
       if (primary.ok) {
-        const parsed = parseHttpOutput(primary.text);
+        const parsed = parseHttpOutput(primary.text, { systemPrompt: system });
         if (parsed.ok) {
           if (isGet && key) cache.set(key, { status: parsed.status, contentType: parsed.contentType, body: parsed.body, model: config.GEMINI_MODEL, fallback: false });
           return { ok: true, status: parsed.status, contentType: parsed.contentType, body: parsed.body, meta: { source: "llm", model: config.GEMINI_MODEL, cached: false, fallback: false, latencyMs: Math.max(0, Date.now() - startMs), reason: attempts.map((a) => `${a.model}:${a.errorKind || "ok"}`).join(";"), attempts: attempts.slice(0, 3) } };
@@ -247,7 +247,7 @@ export function createLlmService({ config, logger, fetchImpl, now }) {
       const fallbackResult = await client.generate({ model: config.GEMINI_FALLBACK_MODEL, system, user: userMessage, schema: HTTP_RESPONSE_SCHEMA });
       if (fallbackResult.attempt) attempts.push(cleanAttempt(fallbackResult.attempt, apiKey));
       if (fallbackResult.ok) {
-        const fallbackParsed = parseHttpOutput(fallbackResult.text);
+        const fallbackParsed = parseHttpOutput(fallbackResult.text, { systemPrompt: system });
         if (fallbackParsed.ok) {
           if (isGet && key) cache.set(key, { status: fallbackParsed.status, contentType: fallbackParsed.contentType, body: fallbackParsed.body, model: config.GEMINI_FALLBACK_MODEL, fallback: true });
           return { ok: true, status: fallbackParsed.status, contentType: fallbackParsed.contentType, body: fallbackParsed.body, meta: { source: "llm", model: config.GEMINI_FALLBACK_MODEL, cached: false, fallback: true, latencyMs: Math.max(0, Date.now() - startMs), reason: attempts.map((a) => `${a.model}:${a.errorKind || "ok"}`).join(";"), attempts: attempts.slice(0, 3) } };

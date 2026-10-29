@@ -47,7 +47,7 @@ export async function start(deps) {
   }
   const log = (deps && deps.logger) || logger;
   const credentials = (deps && deps.credentials) || loadCredentials();
-  const ftp = createFtpHoneypot({ config: cfg, sink, logger: log, credentials });
+  const ftp = createFtpHoneypot({ config: cfg, sink, logger: log, credentials, rateLimiter: deps && deps.rateLimiter, personaNow: deps && deps.personaNow !== undefined ? deps.personaNow : Date.now() });
   await ftp.listen(cfg.FTP_PORT, cfg.BIND_HOST);
   const address = ftp.address();
   try {

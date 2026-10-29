@@ -7,6 +7,27 @@ const outputSchema = z.object({
 
 const DISCLOSURE = /(as an ai|language model|i am an ai|i'm an ai|honeypot|i cannot (assist|help|comply|fulfill)|i can't (assist|help|comply))/i;
 
+const SECRET_PATTERN = /(AIza[0-9A-Za-z\-_]{20,}|GEMINI_API_KEY\s*[:=]|sk-[A-Za-z0-9]{16,}|api[_-]?key\s*[:=]\s*\S{8,})/i;
+const REAL_PATH_PATTERN = /(\/home\/hatch|\/Users\/|\/private\/|C:\\Users|C:\\Windows|D:\\Samrat|Samrat-Ujjwal)/;
+const REAL_COMMAND_PATTERN = /((run|execute) (this|that|the following) command on (your )?real (system|machine|computer)|paste (this|it) into your terminal|curl\s+\S+\s*\|\s*(bash|sh)\b)/i;
+
+export function validateOutputText(text, options = {}) {
+  if (typeof text !== "string") return { ok: false, reason: "malformed" };
+  if (text.length > 32768) return { ok: false, reason: "too_long" };
+  if (SECRET_PATTERN.test(text)) return { ok: false, reason: "secret" };
+  if (REAL_PATH_PATTERN.test(text)) return { ok: false, reason: "real_path" };
+  if (REAL_COMMAND_PATTERN.test(text)) return { ok: false, reason: "instruction" };
+  const systemPrompt = options.systemPrompt;
+  if (typeof systemPrompt === "string" && systemPrompt.length > 0) {
+    const normalized = text.replace(/\s+/g, " ");
+    for (const line of systemPrompt.split("\n")) {
+      const clean = line.replace(/\s+/g, " ").trim();
+      if (clean.length >= 40 && normalized.includes(clean)) return { ok: false, reason: "system_prompt_echo" };
+    }
+  }
+  return { ok: true, reason: null };
+}
+
 function extractJson(text) {
   const trimmed = text.trim();
   try {
@@ -63,6 +84,8 @@ export function parseModelOutput(text, options = {}) {
     const result = outputSchema.safeParse(parsed);
     if (!result.success) return { ok: false, reason: "schema" };
     if (DISCLOSURE.test(result.data.output)) return { ok: false, reason: "disclosure" };
+    const validation = validateOutputText(result.data.output, { systemPrompt: options.systemPrompt });
+    if (!validation.ok) return { ok: false, reason: validation.reason };
     const output = sanitize(result.data.output, options.maxChars);
     return { ok: true, output, exitCode: result.data.exitCode };
   } catch {

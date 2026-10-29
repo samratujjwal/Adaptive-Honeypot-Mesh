@@ -4,6 +4,7 @@ import { logger as sharedLogger } from "../../../packages/shared/src/logger.js";
 import { createVfs } from "../../../packages/vfs/src/vfs.js";
 import { buildFtpSeed } from "./ftp-seed.js";
 import { createPersona } from "../../../packages/persona/src/persona.js";
+import { createRateLimiter } from "../../../packages/shared/src/rate-limit.js";
 import { createHoneytokens } from "../../../packages/persona/src/honeytokens.js";
 import { createFtpSession, resolveFtpPath } from "./session.js";
 import { parseFtpCommand, formatList, formatNlst, formatListLine, fileSize, fileBytes, formatMdtm, parseListArg, previewTextFromBytes, sha256Hex } from "./commands.js";
@@ -56,7 +57,8 @@ export function createFtpHoneypot(options) {
     { username: "ftpuser", password: "ftpuser" },
     { username: "administrator", password: "administrator" },
   ];
-  const persona = options.persona || createPersona({ seed: config.PERSONA_SEED || "change-me-default-seed", hostname: config.HONEYPOT_HOSTNAME, domain: config.HONEYPOT_DOMAIN });
+  const persona = options.persona || createPersona({ seed: config.PERSONA_SEED || "change-me-default-seed", hostname: config.HONEYPOT_HOSTNAME, domain: config.HONEYPOT_DOMAIN, ...(options.personaNow !== undefined ? { now: options.personaNow } : {}) });
+  const rateLimiter = options.rateLimiter || createRateLimiter({});
   const honeytokens = options.honeytokens || createHoneytokens(persona, { enabled: config.HONEYTOKENS_ENABLED !== false });
   const tokenCredentials = honeytokens.tokens.filter((token) => token.account).map((token) => ({ username: token.account, password: token.value }));
   const allCredentials = [...credentials, ...tokenCredentials];
@@ -201,6 +203,20 @@ export function createFtpHoneypot(options) {
   server = net.createServer((socket) => {
     const sourceIp = normalizeIp(socket.remoteAddress || "127.0.0.1");
     const sourcePort = socket.remotePort || 0;
+    if (!rateLimiter.tryAcquireService(sourceIp, "ftp").ok || !rateLimiter.tryAcquireGlobal(sourceIp).ok) {
+      try {
+        socket.write("421 Too many connections.\r\n", () => {
+          try {
+            socket.end();
+          } catch {}
+        });
+      } catch {
+        try {
+          socket.destroy();
+        } catch {}
+      }
+      return;
+    }
     if (connections.size >= config.FTP_MAX_CONNECTIONS || (perIp.get(sourceIp) || 0) >= config.FTP_MAX_CONNECTIONS_PER_IP) {
       try {
         socket.write("421 Too many connections.\r\n", () => {

@@ -67,7 +67,13 @@ export function createPersona(options = {}) {
   const privateIp = `10.${rng.nextInt(200) + 10}.${rng.nextInt(200)}.${rng.nextInt(200) + 10}`;
   const mac = `02:${rng.hex(2)}:${rng.hex(2)}:${rng.hex(2)}:${rng.hex(2)}:${rng.hex(2)}`;
   const bootDays = rng.nextInt(700);
-  const bootDate = new Date(Date.UTC(2023, 0, 1) + bootDays * 86400000 + 6 * 3600000 + 12 * 60000);
+  let bootDate = new Date(Date.UTC(2023, 0, 1) + bootDays * 86400000 + 6 * 3600000 + 12 * 60000);
+  if (options.now !== undefined && options.now !== null) {
+    const nowMs = typeof options.now === "function" ? options.now() : (options.now instanceof Date ? options.now.getTime() : Number(options.now));
+    const bootRng = prng(`${seed}:boot-time`);
+    const daysAgo = 40 + bootRng.nextInt(51);
+    bootDate = new Date(nowMs - daysAgo * 86400000);
+  }
   const bootTime = bootDate.toISOString().replace(/\.\d+Z$/, "Z");
   const pid = (base) => base + rng.nextInt(40);
   const sshdPid = pid(320);

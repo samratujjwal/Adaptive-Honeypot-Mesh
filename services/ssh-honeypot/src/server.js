@@ -11,6 +11,7 @@ import { createVfs } from "../../../packages/vfs/src/vfs.js";
 import { buildSeed, uidForUser } from "./seed/ubuntu-2204.js";
 import { createCommandEngine } from "./commands.js";
 import { createPersona } from "../../../packages/persona/src/persona.js";
+import { createRateLimiter } from "../../../packages/shared/src/rate-limit.js";
 import { createHoneytokens } from "../../../packages/persona/src/honeytokens.js";
 import { toEventLlm } from "../../../packages/llm/src/service.js";
 
@@ -45,8 +46,9 @@ export function createSshHoneypot(options) {
   const { config, sink } = options;
   const log = options.logger || logger;
   const credentials = options.credentials || loadCredentials(options.credentialsPath || defaultCredentialsPath());
-  const persona = options.persona || createPersona({ seed: config.PERSONA_SEED || "change-me-default-seed", hostname: config.HONEYPOT_HOSTNAME, domain: config.HONEYPOT_DOMAIN });
+  const persona = options.persona || createPersona({ seed: config.PERSONA_SEED || "change-me-default-seed", hostname: config.HONEYPOT_HOSTNAME, domain: config.HONEYPOT_DOMAIN, ...(options.personaNow !== undefined ? { now: options.personaNow } : {}) });
   const honeytokens = options.honeytokens || createHoneytokens(persona, { enabled: config.HONEYTOKENS_ENABLED !== false });
+  const rateLimiter = options.rateLimiter || createRateLimiter({});
   const lastLogins = new Map();
   if (config.PERSONA_SEED === "change-me-default-seed") {
     try { log.warn("PERSONA_SEED is the default value; set your own random seed in .env"); } catch {}
@@ -128,6 +130,12 @@ export function createSshHoneypot(options) {
   server = new Server({ hostKeys: [hostKey.privateKey], ident }, (client, info) => {
     const sourceIp = (info && info.ip) || "127.0.0.1";
     const sourcePort = (info && info.port) || 0;
+    if (!rateLimiter.tryAcquireService(sourceIp, "ssh").ok || !rateLimiter.tryAcquireGlobal(sourceIp).ok) {
+      try {
+        client.end();
+      } catch {}
+      return;
+    }
     const total = connections.size;
     const perIpCount = perIp.get(sourceIp) || 0;
     if (total >= config.SSH_MAX_CONNECTIONS || perIpCount >= config.SSH_MAX_CONNECTIONS_PER_IP) {

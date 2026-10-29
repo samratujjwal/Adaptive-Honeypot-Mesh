@@ -15,13 +15,13 @@ import { getStats } from "../../../packages/search/src/reads.js";
  * @param {object} deps.config
  * @returns {object}
  */
-export function createServer({ es, logger, config }) {
+export function createServer({ es, logger, config, apiRateLimiter }) {
   const log = logger || { info: () => {}, warn: () => {}, error: () => {} };
   const prefix = config.ES_INDEX_PREFIX;
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "64kb" }));
-  app.use(createRouter({ es, prefix, logger: log }));
+  app.use(createRouter({ es, prefix, logger: log, apiRateLimiter }));
   const server = createHttpServer(app);
   const io = new Server(server, {
     cors: {

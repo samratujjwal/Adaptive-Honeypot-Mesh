@@ -43,11 +43,11 @@ export const SCENARIOS = {
 };
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
 
-export function validateTarget(host, port) {
+export function validateTarget(host, port, allowedPorts = Object.values(PORTS)) {
   if (host !== ALLOWED_HOST) {
     throw new Error(`simulator target not allowed: ${host}`);
   }
-  if (!Object.values(PORTS).includes(port)) {
+  if (!allowedPorts.includes(port)) {
     throw new Error(`simulator port not allowed: ${port}`);
   }
 }
@@ -72,16 +72,16 @@ export function displayRequest(request) {
   return `${request.protocol}: ${request.display}`;
 }
 
-export function requestPorts(requests) {
+export function requestPorts(requests, portMap = PORTS) {
   const ports = [];
   for (const request of requests) {
-    const port = PORTS[request.protocol];
+    const port = portMap[request.protocol];
     if (!ports.includes(port)) ports.push(port);
   }
   return ports;
 }
 
-export function formatSummary({ scenario, count, host, requests, sent, failed }) {
+export function formatSummary({ scenario, count, host, requests, sent, failed, ports = PORTS }) {
   const types = [];
   for (const request of requests) {
     const label = displayRequest(request);
@@ -91,7 +91,7 @@ export function formatSummary({ scenario, count, host, requests, sent, failed })
     `scenario: ${scenario}`,
     `count: ${count}`,
     `host: ${host}`,
-    `ports: ${requestPorts(requests).join(", ")}`,
+    `ports: ${requestPorts(requests, ports).join(", ")}`,
     `requests sent: ${sent}`,
     `requests failed: ${failed}`,
     `request types: ${types.join(", ")}`,
@@ -199,8 +199,9 @@ class LineReader {
   }
 }
 
-async function sendHttp(request, host) {
-  const socket = await connectTcp(host, PORTS.http);
+async function sendHttp(request, host, ports = PORTS) {
+  const socket = await connectTcp(host, ports.http);
+  socket.on("data", () => {});
   try {
     const body = request.body || "";
     const raw = `${request.method} ${request.target} HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\nContent-Length: ${Buffer.byteLength(body, "utf8")}\r\n\r\n${body}`;
@@ -221,8 +222,8 @@ async function sendHttp(request, host) {
   }
 }
 
-async function runFtpSession(requests, host) {
-  const socket = await connectTcp(host, PORTS.ftp);
+async function runFtpSession(requests, host, ports = PORTS) {
+  const socket = await connectTcp(host, ports.ftp);
   const reader = new LineReader(socket);
   try {
     await reader.readLine();
@@ -237,9 +238,20 @@ async function runFtpSession(requests, host) {
       if (!match) throw new Error("passive mode reply not understood");
       const dataPort = Number.parseInt(match[5], 10) * 256 + Number.parseInt(match[6], 10);
       const dataSocket = await connectTcp(host, dataPort);
-      const dataDone = new Promise((resolve) => {
-        dataSocket.once("close", resolve);
-        dataSocket.once("error", resolve);
+      const dataDone = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          try { dataSocket.destroy(); } catch {}
+          reject(new Error("data transfer timed out"));
+        }, 5000);
+        dataSocket.on("data", () => {});
+        dataSocket.once("close", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+        dataSocket.once("error", () => {
+          clearTimeout(timer);
+          resolve();
+        });
       });
       reader.send(`${request.verb} ${request.arg}`);
       await reader.readLine();
@@ -255,7 +267,7 @@ async function runFtpSession(requests, host) {
   }
 }
 
-async function runSshSession(commands, host) {
+async function runSshSession(commands, host, ports = PORTS) {
   let mod;
   try {
     mod = await import("ssh2");
@@ -270,6 +282,14 @@ async function runSshSession(commands, host) {
       try { conn.end(); } catch {}
       reject(new Error("ssh session timed out"));
     }, 15000);
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      try { conn.end(); } catch {}
+      resolve();
+    };
     conn.on("ready", () => {
       conn.shell((error, stream) => {
         if (error) {
@@ -278,16 +298,9 @@ async function runSshSession(commands, host) {
           reject(error);
           return;
         }
-        stream.on("close", () => {
-          clearTimeout(timer);
-          conn.end();
-          resolve();
-        });
-        stream.on("error", () => {
-          clearTimeout(timer);
-          conn.end();
-          resolve();
-        });
+        stream.on("data", () => {});
+        stream.on("close", finish);
+        stream.on("error", finish);
         for (const command of commands) stream.write(`${command}\n`);
       });
     });
@@ -295,14 +308,15 @@ async function runSshSession(commands, host) {
       clearTimeout(timer);
       reject(error);
     });
-    conn.connect({ host, port: PORTS.ssh, username: TEST_SSH_USER, password: TEST_SSH_PASSWORD, readyTimeout: 5000 });
+    conn.on("close", finish);
+    conn.connect({ host, port: ports.ssh, username: TEST_SSH_USER, password: TEST_SSH_PASSWORD, readyTimeout: 5000 });
   });
 }
 
-export async function runScenario({ scenario, count, delay, host }) {
+export async function runScenario({ scenario, count, delay, host, ports = PORTS }) {
   const name = resolveScenario(scenario);
   const requests = buildRequestList(name, count);
-  for (const request of requests) validateTarget(host, PORTS[request.protocol]);
+  for (const request of requests) validateTarget(host, ports[request.protocol], Object.values(ports));
   let sent = 0;
   let failed = 0;
   let index = 0;
@@ -315,47 +329,61 @@ export async function runScenario({ scenario, count, delay, host }) {
     }
     try {
       if (request.protocol === "ssh") {
-        await runSshSession(batch.map((item) => item.command), host);
+        await runSshSession(batch.map((item) => item.command), host, ports);
+        sent += batch.length;
       } else if (request.protocol === "ftp") {
-        await runFtpSession(batch, host);
+        await runFtpSession(batch, host, ports);
+        sent += batch.length;
       } else {
-        await sendHttp(request, host);
+        for (const item of batch) {
+          try {
+            await sendHttp(item, host, ports);
+            sent += 1;
+          } catch {
+            failed += 1;
+          }
+        }
       }
-      sent += batch.length;
     } catch {
       failed += batch.length;
     }
     if (index < requests.length && delay > 0) await sleep(delay);
   }
-  return { scenario: name, count, host, requests, sent, failed };
+  return { scenario: name, count, host, requests, sent, failed, ports };
 }
 
-async function main(argv) {
-  let options;
+export async function runCli(argv, options = {}) {
+  const ports = options.ports || PORTS;
+  let cliOptions;
   try {
-    options = parseArgs(argv);
+    cliOptions = parseArgs(argv);
   } catch (error) {
     console.error(error.message);
-    process.exit(1);
+    return 1;
   }
-  if (options.list) {
+  if (cliOptions.list) {
     for (const name of SCENARIO_NAMES) console.log(name);
-    return;
+    return 0;
   }
   let requests;
   try {
-    requests = buildRequestList(options.scenario, options.count);
-    for (const request of requests) validateTarget(options.host, PORTS[request.protocol]);
+    requests = buildRequestList(cliOptions.scenario, cliOptions.count);
+    for (const request of requests) validateTarget(cliOptions.host, ports[request.protocol], Object.values(ports));
   } catch (error) {
     console.error(error.message);
-    process.exit(1);
+    return 1;
   }
-  if (options.dryRun) {
-    console.log(formatDryRun(resolveScenario(options.scenario), requests));
-    return;
+  if (cliOptions.dryRun) {
+    console.log(formatDryRun(resolveScenario(cliOptions.scenario), requests));
+    return 0;
   }
-  const result = await runScenario({ scenario: options.scenario, count: options.count, delay: options.delay, host: options.host });
+  const result = await runScenario({ scenario: cliOptions.scenario, count: cliOptions.count, delay: cliOptions.delay, host: cliOptions.host, ports });
   console.log(formatSummary(result));
+  return result.failed > 0 ? 1 : 0;
+}
+
+async function main(argv) {
+  process.exitCode = await runCli(argv);
 }
 
 if (process.argv[1] && process.argv[1].endsWith("attack-simulator.js")) {

@@ -1,3 +1,5 @@
+import { validateOutputText } from "./output.js";
+
 const STATUS_ALLOWLIST = new Set([200, 301, 302, 400, 401, 403, 404, 500]);
 const CONTENT_TYPE_ALLOWLIST = new Set([
   "text/html; charset=UTF-8",
@@ -41,7 +43,7 @@ function parseJsonText(text) {
  * @param {string} text
  * @returns {{ ok: boolean, status?: number, contentType?: string, body?: string, reason?: string }}
  */
-export function parseHttpOutput(text) {
+export function parseHttpOutput(text, options = {}) {
   try {
     const parsed = parseJsonText(text);
     if (!parsed || typeof parsed !== "object") return { ok: false, reason: "bad_json" };
@@ -49,6 +51,8 @@ export function parseHttpOutput(text) {
     if (!CONTENT_TYPE_ALLOWLIST.has(parsed.contentType)) return { ok: false, reason: "bad_content_type" };
     if (typeof parsed.body !== "string") return { ok: false, reason: "bad_body" };
     if (DISCLOSURE.test(parsed.body)) return { ok: false, reason: "disclosure" };
+    const validation = validateOutputText(parsed.body, { systemPrompt: options.systemPrompt });
+    if (!validation.ok) return { ok: false, reason: validation.reason };
     const cleaned = stripControl(parsed.body);
     const bytes = Buffer.byteLength(cleaned, "utf8");
     const body = bytes > 32768 ? Buffer.from(cleaned, "utf8").subarray(0, 32768).toString("utf8") : cleaned;
